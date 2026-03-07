@@ -79,7 +79,7 @@ if __name__ == '__main__':
     embedding_dim = 512
     hidden_dim = 512
     num_layers = 1
-    dropout = 0.3   # 如果需要 dropout，在 Encoder/Decoder 中启用
+    dropout = 0.5   # 如果需要 dropout，在 Encoder/Decoder 中启用
 
     encoder = Encoder(vocab_size, embedding_dim, hidden_dim, num_layers, dropout)
     decoder = Decoder(vocab_size, embedding_dim, hidden_dim, num_layers, dropout)
@@ -89,5 +89,5 @@ if __name__ == '__main__':
     trainer = Trainer(model, dataloader, learning_rate=0.001)
 
     # 5. 开始训练（传入总 epoch 数）
-    num_epochs = 200
+    num_epochs = 300
     trainer.train(num_epochs)

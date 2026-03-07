@@ -75,10 +75,17 @@ python train.py
 
 ```bash
 python chat.py
-# 可以在这个文件取消注释 predicted_id = torch.argmax(output, dim=-1).item()
-# 并注释 predicted_id = torch.multinomial(output, num_samples=1).item()
-# 以获取最"可能"的回答
-# 默认使用 multinomia 获取多元的预测结果
+```
+可以注释掉以下代码，以取消多元的预测结果
+```
+top_probs, top_indices = torch.topk(output, k=5, dim=-1)
+probs = top_probs[0]  # 取第一个样本的概率分布
+sampled_idx = torch.multinomial(probs, num_samples=1).item()
+predicted_id = top_indices[0, int(sampled_idx)].item()
+```
+并取消注释一下代码，以获取最"可能"的回答
+```
+predicted_id = torch.argmax(output, dim=-1).item()
 ```
 
 输入 `exit` 退出聊天。

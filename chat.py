@@ -75,10 +75,16 @@ def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=100):
         for _ in range(max_len):
             output, hidden, cell = model.decoder(decoder_input, hidden, cell)
             # 应用 softmax 获取概率分布
+            # 应用 softmax 获取概率分布
             output = torch.softmax(output, dim=-1)
-            
+
+            # 获取概率最高的前 k 个词及其概率
+            top_probs, top_indices = torch.topk(output, k=5, dim=-1)
+            probs = top_probs[0]  # 取第一个样本的概率分布
+
             # 根据概率分布采样
-            predicted_id = torch.multinomial(output, num_samples=1).item()
+            sampled_idx = torch.multinomial(probs, num_samples=1).item()
+            predicted_id = top_indices[0, int(sampled_idx)].item()  # 获取对应的词 ID
             # 选择概率最高的词作为预测
             # predicted_id = torch.argmax(output, dim=-1).item()
 
@@ -98,9 +104,11 @@ def chat_loop(model):
     while True:
         user_input = input("[user]: ").strip()
         if user_input.lower() == 'exit':
-            print("再见！")
+            print("[bot]: 再见！")
             break
-        
+        if not user_input:
+            print("[bot]: 请输入一些内容...")
+            continue
         # 编码用户输入
         input_tensor = encode_sentence(user_input)  # (1, seq_len)
         
@@ -116,7 +124,7 @@ if __name__ == '__main__':
     EMBED_SIZE = 512
     HIDDEN_SIZE = 512
     NUM_LAYERS = 1
-    DROPOUT = 0.3
+    DROPOUT = 0.5
     
     # 模型文件路径（根据实际情况修改）
     model_path = 'model/chat_model.pth'  # 如果放在当前目录可直接用 'chat_model.pth'
