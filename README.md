@@ -79,7 +79,6 @@ python chat.py
 
 输入 `exit` 退出聊天。
 
- dui hua。
 
 ## 模型参数
 

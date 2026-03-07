@@ -62,7 +62,7 @@ def load_model(model_path, vocab_size, embed_size=256, hidden_size=512, num_laye
     return model
 
 # 推理生成回答（贪婪搜索）
-def generate_response(model, input_tensor, max_len=50):
+def generate_response(model, input_tensor, max_len=100):
     with torch.no_grad():
         input_tensor = input_tensor.to(device)
         # 编码器前向
@@ -96,7 +96,7 @@ def generate_response(model, input_tensor, max_len=50):
 def chat_loop(model):
     print("聊天机器人已启动（输入 'exit' 退出）")
     while True:
-        user_input = input("你: ").strip()
+        user_input = input("[user]: ").strip()
         if user_input.lower() == 'exit':
             print("再见！")
             break
@@ -109,14 +109,14 @@ def chat_loop(model):
         
         # 解码为中文
         response = decode_ids(output_ids)
-        print(f"机器人: {response}")
+        print(f"[bot]: {response}")
 
 if __name__ == '__main__':
     # 模型参数（必须与训练时一致）
-    EMBED_SIZE = 64
-    HIDDEN_SIZE = 64
+    EMBED_SIZE = 512
+    HIDDEN_SIZE = 512
     NUM_LAYERS = 1
-    DROPOUT = 0.4
+    DROPOUT = 0.3
     
     # 模型文件路径（根据实际情况修改）
     model_path = 'model/chat_model.pth'  # 如果放在当前目录可直接用 'chat_model.pth'

@@ -3,7 +3,7 @@ import json
 
 def tokenize_chinese(text):
     """返回分词后的列表"""
-    return list(jieba.cut(text))
+    return list(jieba.cut(text, HMM=True))
 
 class Vocab:
     def __init__(self, sentences, min_freq=1):

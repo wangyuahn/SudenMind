@@ -76,10 +76,10 @@ if __name__ == '__main__':
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_batch)
 
     # 3. 初始化模型
-    embedding_dim = 64
-    hidden_dim = 64
+    embedding_dim = 512
+    hidden_dim = 512
     num_layers = 1
-    dropout = 0.4   # 如果需要 dropout，在 Encoder/Decoder 中启用
+    dropout = 0.3   # 如果需要 dropout，在 Encoder/Decoder 中启用
 
     encoder = Encoder(vocab_size, embedding_dim, hidden_dim, num_layers, dropout)
     decoder = Decoder(vocab_size, embedding_dim, hidden_dim, num_layers, dropout)
@@ -88,6 +88,6 @@ if __name__ == '__main__':
     # 4. 初始化训练器
     trainer = Trainer(model, dataloader, learning_rate=0.001)
 
-    # 5. 开始训练（直接调用一次，传入总 epoch 数）
-    num_epochs = 10000
+    # 5. 开始训练（传入总 epoch 数）
+    num_epochs = 200
     trainer.train(num_epochs)
