@@ -58,11 +58,16 @@ def pretrain(model, dataloader, epochs=10, learning_rate=0.001):
         
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+        if avg_loss < 0.5:
+            print("-> Loss < 0.5, stop pretraining.")
+            torch.save(model.state_dict(), 'model/pretrained_model.pth')
+            print("-> Save best model with Loss: {:.4f}".format(best_loss))
+            break
         if avg_loss < best_loss:
             best_loss = avg_loss
             torch.save(model.state_dict(), 'model/pretrained_model.pth')
             print("-> Save best model with Loss: {:.4f}".format(best_loss))
-
+        
 if __name__ == "__main__":
     knowledge_list = []
     with open('knowledge.json', 'r', encoding='utf-8') as f:
@@ -81,5 +86,5 @@ if __name__ == "__main__":
     
     model = Seq2Seq(encoder, decoder, device).to(device)
 
-    pretrain(model, dataloader, epochs=200, learning_rate=0.01)
+    pretrain(model, dataloader, epochs=200, learning_rate=1e-4)
 
