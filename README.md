@@ -120,7 +120,7 @@ DROPOUT = 0.5        #  dropout 率
 - **corpus.txt**：原始语料库，包含问答对
 - **vocab.json**：词汇表，映射词与 ID
 - **processed_data.json**：处理后的数据，用于模型训练
-- **knowledge.json** 模型所用的知识库
+- **knowledge.json**: 模型所用的知识库
 
 ## 注意事项
 
