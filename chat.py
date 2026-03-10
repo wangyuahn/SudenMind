@@ -61,7 +61,7 @@ def load_model(model_path: str, vocab_size: int, embed_size: int = 256, hidden_s
     model.eval()
     return model
 
-# 推理生成回答（贪婪搜索）
+# 推理生成回答
 def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000):
     with torch.no_grad():
         input_tensor = input_tensor.to(device)
@@ -74,7 +74,6 @@ def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000):
         generated_ids = []
         for _ in range(max_len):
             output, hidden, cell = model.decoder(decoder_input, hidden, cell)
-            # 应用 softmax 获取概率分布
             # 应用 softmax 获取概率分布
             output = torch.softmax(output, dim=-1)
 
