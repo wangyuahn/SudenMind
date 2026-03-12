@@ -178,7 +178,7 @@ if __name__ == '__main__':
     model = Seq2Seq(encoder, decoder, device)
 
     # 加载预训练权重
-    pretrained_path = 'model/chat_model.pth'  
+    pretrained_path = 'model/prechat_model.pth'  
     try:
         model.load_state_dict(torch.load(pretrained_path, map_location=device))
         print(f"已加载预训练模型: {pretrained_path}")
