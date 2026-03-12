@@ -3,9 +3,6 @@ import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
-from typing import Optional
-import itertools  # 新增：用于循环迭代器
-import random      # 新增：用于随机选择索引
 from model import Seq2Seq, Encoder, Decoder
 
 # 复用预训练数据集定义

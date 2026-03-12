@@ -13,7 +13,7 @@ import jieba
 def tokenize_chinese(text):
     return list(jieba.cut(text, HMM=True))
 
-class PretrainDataset(Dataset):
+class KnowledgeTrainDataset(Dataset):
     def __init__(self, knowledge_list, word2id):
         self.knowledge_list = knowledge_list
         self.word2id = word2id
@@ -55,13 +55,13 @@ def collate_batch(batch):
 class Trainer:
     def __init__(self, model: Seq2Seq, dataloader: DataLoader,
                  encoder_lr: float = 1e-5, decoder_lr: float = 5e-4,
-                 pretrain_dataloader: Optional[DataLoader] = None,
-                 pretrain_loss_weight: float = 0.2,
+                 knowledge_train_dataloader: Optional[DataLoader] = None,
+                 knowledge_train_loss_weight: float = 0.2,
                  device: torch.device = device):
         self.model = model.to(device)
         self.dataloader = dataloader
-        self.pretrain_dataloader = pretrain_dataloader
-        self.pretrain_loss_weight = pretrain_loss_weight
+        self.knowledge_train_dataloader = knowledge_train_dataloader
+        self.knowledge_train_loss_weight = knowledge_train_loss_weight
         self.device = device
         self.criterion = nn.CrossEntropyLoss(ignore_index=0)
 
@@ -81,16 +81,16 @@ class Trainer:
     def train(self, epochs):
         self.model.train()
 
-        # 使用 itertools.cycle 创建无限循环的预训练数据迭代器（如果提供）
-        if self.pretrain_dataloader is not None:
-            pretrain_cycle = itertools.cycle(self.pretrain_dataloader)
+        # 使用 itertools.cycle 创建无限循环的知识训练数据迭代器（如果提供）
+        if self.knowledge_train_dataloader is not None:
+            knowledge_train_cycle = itertools.cycle(self.knowledge_train_dataloader)
         else:
-            pretrain_cycle = None
+            knowledge_train_cycle = None
 
         for epoch in range(epochs):
             total_loss = 0.0
             total_qa_loss = 0.0
-            total_pretrain_loss = 0.0
+            total_knowledge_train_loss = 0.0
 
             for inp, tgt in self.dataloader:
                 inp, tgt = inp.to(self.device), tgt.to(self.device)
@@ -100,23 +100,24 @@ class Trainer:
                 output = self.model(inp, tgt)
                 loss_qa = self.criterion(output.view(-1, output.size(-1)), tgt.view(-1))
 
-                # 预训练任务前向（如果启用）
-                loss_pretrain = torch.tensor(0.0, device=self.device)
-                if pretrain_cycle is not None:
-                    pretrain_batch = next(pretrain_cycle)  # 自动循环，不会 StopIteration
-                    pretrain_batch = pretrain_batch.to(self.device)
-                    # 构造输入和目标：输入为前 5 个 token，目标为后面的 token
-                    idx = random.randint(5, 15)
-                    input_pretrain = pretrain_batch[:, :idx]
-                    target_pretrain = pretrain_batch[:, idx:]
-                    output_pretrain = self.model(input_pretrain, target_pretrain)
-                    loss_pretrain = self.criterion(
-                        output_pretrain.reshape(-1, output_pretrain.size(-1)),
-                        target_pretrain.reshape(-1)
+                # 知识训练任务前向（如果启用）
+                loss_knowledge_train = torch.tensor(0.0, device=self.device)
+                if knowledge_train_cycle is not None:
+                    knowledge_train_batch = next(knowledge_train_cycle)  # 自动循环，不会 StopIteration
+                    knowledge_train_batch = knowledge_train_batch.to(self.device)
+                    # 构造输入和目标：输入为前 3 个 token，目标为后面的 token
+                    idx = random.randint(3, 15)
+                    # len_seq = random.randint(3, 10)
+                    input_knowledge_train = knowledge_train_batch[:, :idx]  # 随机截取一段作为输入
+                    target_knowledge_train = knowledge_train_batch[:, idx:]  # 目标为输入后一个 token 开始所有 token
+                    output_knowledge_train = self.model(input_knowledge_train, target_knowledge_train)
+                    loss_knowledge_train = self.criterion(
+                        output_knowledge_train.reshape(-1, output_knowledge_train.size(-1)),
+                        target_knowledge_train.reshape(-1)
                     )
 
                 # 总损失
-                total_loss_batch = loss_qa + self.pretrain_loss_weight * loss_pretrain
+                total_loss_batch = loss_qa + self.knowledge_train_loss_weight * loss_knowledge_train
                 total_loss_batch.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.optimizer.step()
@@ -124,14 +125,14 @@ class Trainer:
                 # 累加标量值
                 total_loss += total_loss_batch.item()
                 total_qa_loss += loss_qa.item()
-                total_pretrain_loss += loss_pretrain.item()
+                total_knowledge_train_loss += loss_knowledge_train.item()
 
             self.scheduler.step()
             avg_loss = total_loss / len(self.dataloader)
             avg_qa_loss = total_qa_loss / len(self.dataloader)
-            avg_pretrain_loss = total_pretrain_loss / len(self.dataloader) if pretrain_cycle else 0.0
+            avg_knowledge_train_loss = total_knowledge_train_loss / len(self.dataloader) if knowledge_train_cycle else 0.0
 
-            print(f"Epoch {epoch+1}/{epochs} | Total Loss: {avg_loss:.4f} | QA Loss: {avg_qa_loss:.4f} | Pretrain Loss: {avg_pretrain_loss:.4f}")
+            print(f"Epoch {epoch+1}/{epochs} | Total Loss: {avg_loss:.4f} | QA Loss: {avg_qa_loss:.4f} | Knowledge Train Loss: {avg_knowledge_train_loss:.4f}")
 
             # 保存最佳模型
             if avg_loss < self.best_loss:
@@ -157,14 +158,14 @@ if __name__ == '__main__':
     dataset = ChatDataset('processed_data.json')
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_batch)
 
-    # ---------- 3. 加载预训练数据集（知识文本） ----------
+    # ---------- 3. 加载知识训练数据集（知识文本） ----------
     knowledge_list = []
     with open('knowledge.json', 'r', encoding='utf-8') as f:
         knowledge = json.load(f)
         for item in knowledge:
             knowledge_list.append(item["text"])
-    pretrain_dataset = PretrainDataset(knowledge_list, word2id)
-    pretrain_dataloader = DataLoader(pretrain_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
+    knowledge_train_dataset = KnowledgeTrainDataset(knowledge_list, word2id)
+    knowledge_train_dataloader = DataLoader(knowledge_train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
 
     # ---------- 4. 初始化模型 ----------
     embedding_dim = 256
@@ -177,7 +178,7 @@ if __name__ == '__main__':
     model = Seq2Seq(encoder, decoder, device)
 
     # 加载预训练权重
-    pretrained_path = 'model/prechat_model.pth'  
+    pretrained_path = 'model/chat_model.pth'  
     try:
         model.load_state_dict(torch.load(pretrained_path, map_location=device))
         print(f"已加载预训练模型: {pretrained_path}")
@@ -194,8 +195,8 @@ if __name__ == '__main__':
         dataloader=dataloader,
         encoder_lr=1e-3,
         decoder_lr=1e-4,
-        pretrain_dataloader=pretrain_dataloader,
-        pretrain_loss_weight=1,  # 预训练损失权重较小，主要微调问答任务
+        knowledge_train_dataloader=knowledge_train_dataloader,
+        knowledge_train_loss_weight=1,  # 知识训练损失权重较小，主要微调问答任务
         device=device
     )
 
