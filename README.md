@@ -5,7 +5,7 @@
 ## 项目结构
 
 ```
-MYCHATBOT/
+SudenMind/
 ├── __pycache__/        # Python 编译缓存
 ├── model/              # 模型存储目录
 │   └── chat_model.pth  # 训练好的模型
@@ -39,8 +39,8 @@ MYCHATBOT/
 1. **克隆项目**
 
    ```bash
-   git clone https://github.com/wangyuahn/MYCHATBOT.git
-   cd MYCHATBOT
+   git clone https://github.com/wangyuahn/SudenMind.git
+   cd SudenMind
    ```
 
 2. **安装依赖**

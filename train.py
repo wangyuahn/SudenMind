@@ -106,10 +106,10 @@ class Trainer:
                     knowledge_train_batch = next(knowledge_train_cycle)  # 自动循环，不会 StopIteration
                     knowledge_train_batch = knowledge_train_batch.to(self.device)
                     # 构造输入和目标：输入为前 3 个 token，目标为后面的 token
-                    idx = random.randint(3, 15)
-                    # len_seq = random.randint(3, 10)
-                    input_knowledge_train = knowledge_train_batch[:, :idx]  # 随机截取一段作为输入
-                    target_knowledge_train = knowledge_train_batch[:, idx:]  # 目标为输入后一个 token 开始所有 token
+                    idx = random.randint(0, 15)
+                    len_seq = random.randint(3, 10)
+                    input_knowledge_train = knowledge_train_batch[:, idx:idx+len_seq]  # 随机截取一段作为输入
+                    target_knowledge_train = knowledge_train_batch[:, :]  # 目标为这个知识的完整文本。即 :
                     output_knowledge_train = self.model(input_knowledge_train, target_knowledge_train)
                     loss_knowledge_train = self.criterion(
                         output_knowledge_train.reshape(-1, output_knowledge_train.size(-1)),
@@ -196,7 +196,7 @@ if __name__ == '__main__':
         encoder_lr=1e-3,
         decoder_lr=1e-4,
         knowledge_train_dataloader=knowledge_train_dataloader,
-        knowledge_train_loss_weight=1,  # 知识训练损失权重较小，主要微调问答任务
+        knowledge_train_loss_weight=0.1,  # 知识训练损失权重较小，主要微调问答任务
         device=device
     )
 
