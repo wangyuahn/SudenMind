@@ -47,12 +47,14 @@ class Trainer:
         # 分层学习率
         encoder_params = list(model.encoder.parameters())
         decoder_params = list(model.decoder.parameters())
-        self.optimizer = optim.RMSprop([
+        self.optimizer = optim.AdamW([
             {'params': encoder_params, 'lr': encoder_lr},
             {'params': decoder_params, 'lr': decoder_lr}
         ], weight_decay=1e-5)
 
-        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.9)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.5, patience=5
+        )
         self.best_loss = float('inf')
         self.patience = 100
         self.counter = 0
@@ -79,9 +81,9 @@ class Trainer:
                 # 累加标量值
                 total_loss += total_loss_batch.item()
 
-            self.scheduler.step()
+            
             avg_loss = total_loss / len(self.dataloader)
-        
+            self.scheduler.step(avg_loss)
             print(f"Epoch {epoch+1}/{epochs} | Total Loss: {avg_loss:.4f}")
 
             # 保存最佳模型
@@ -106,12 +108,12 @@ if __name__ == '__main__':
 
     # ---------- 2. 加载问答数据集 ----------
     dataset = ChatDataset('processed_data.json')
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_batch)
+    dataloader = DataLoader(dataset, batch_size=512, shuffle=True, collate_fn=collate_batch)
 
     # ---------- 3. 初始化模型 ----------
     embedding_dim = 256
     hidden_dim = 1024
-    num_layers = 1
+    num_layers = 2
     dropout = 0.5
 
     encoder = Encoder(vocab_size, embedding_dim, hidden_dim, num_layers, dropout).to(device)
@@ -134,8 +136,8 @@ if __name__ == '__main__':
     trainer = Trainer(
         model=model,
         dataloader=dataloader,
-        encoder_lr=1e-3,
-        decoder_lr=1e-4,
+        encoder_lr=2e-4,
+        decoder_lr=4e-4,
         device=device
     )
 

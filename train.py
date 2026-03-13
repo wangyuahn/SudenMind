@@ -68,7 +68,7 @@ class Trainer:
         # 分层学习率
         encoder_params = list(model.encoder.parameters())
         decoder_params = list(model.decoder.parameters())
-        self.optimizer = optim.RMSprop([
+        self.optimizer = optim.Adam([
             {'params': encoder_params, 'lr': encoder_lr},
             {'params': decoder_params, 'lr': decoder_lr}
         ], weight_decay=1e-5)
@@ -106,10 +106,11 @@ class Trainer:
                     knowledge_train_batch = next(knowledge_train_cycle)  # 自动循环，不会 StopIteration
                     knowledge_train_batch = knowledge_train_batch.to(self.device)
                     # 构造输入和目标：输入为前 3 个 token，目标为后面的 token
-                    idx = random.randint(0, 15)
-                    len_seq = random.randint(3, 10)
+                    # idx = random.randint(0, knowledge_train_batch.size(1) - 11)  # 确保至少有 10 个 token 可用
+                    idx = random.randint(0, 20)
+                    len_seq = random.randint(4, 10)
                     input_knowledge_train = knowledge_train_batch[:, idx:idx+len_seq]  # 随机截取一段作为输入
-                    target_knowledge_train = knowledge_train_batch[:, :]  # 目标为这个知识的完整文本。即 :
+                    target_knowledge_train = knowledge_train_batch[:, idx+len_seq:]
                     output_knowledge_train = self.model(input_knowledge_train, target_knowledge_train)
                     loss_knowledge_train = self.criterion(
                         output_knowledge_train.reshape(-1, output_knowledge_train.size(-1)),
@@ -178,25 +179,21 @@ if __name__ == '__main__':
     model = Seq2Seq(encoder, decoder, device)
 
     # 加载预训练权重
-    pretrained_path = 'model/prechat_model.pth'  
+    pretrained_path = 'model/chat_model.pth'  
     try:
         model.load_state_dict(torch.load(pretrained_path, map_location=device))
         print(f"已加载预训练模型: {pretrained_path}")
     except FileNotFoundError:
         print(f"未找到预训练模型 {pretrained_path}，将从头开始训练。")
 
-    # 可选：冻结编码器（这里不冻结，用分层学习率）
-    # for param in model.encoder.parameters():
-    #     param.requires_grad = False
-
     # ---------- 5. 初始化训练器 ----------
     trainer = Trainer(
         model=model,
         dataloader=dataloader,
-        encoder_lr=1e-3,
+        encoder_lr=5e-6,
         decoder_lr=1e-4,
         knowledge_train_dataloader=knowledge_train_dataloader,
-        knowledge_train_loss_weight=0.1,  # 知识训练损失权重较小，主要微调问答任务
+        knowledge_train_loss_weight=0.8,  # 知识训练损失权重较小，主要微调问答任务
         device=device
     )
 

@@ -62,7 +62,7 @@ def load_model(model_path: str, vocab_size: int, embed_size: int = 256, hidden_s
     return model
 
 # 推理生成回答
-def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000):
+def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000, temperature=1.0):
     with torch.no_grad():
         input_tensor = input_tensor.to(device)
         # 编码器前向
@@ -74,11 +74,13 @@ def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000):
         generated_ids = []
         for _ in range(max_len):
             output, hidden, cell = model.decoder(decoder_input, hidden, cell)
+            # 应用 temperature 调整
+            output = output / temperature
             # 应用 softmax 获取概率分布
             output = torch.softmax(output, dim=-1)
 
             # 获取概率最高的前 k 个词及其概率
-            top_probs, top_indices = torch.topk(output, k=3, dim=-1)
+            top_probs, top_indices = torch.topk(output, k=10, dim=-1)
             probs = top_probs[0]  # 取第一个样本的概率分布
 
             # 根据概率分布采样
@@ -111,8 +113,8 @@ def chat_loop(model):
         # 编码用户输入
         input_tensor = encode_sentence(user_input)  # (1, seq_len)
         
-        # 生成回答
-        output_ids = generate_response(model, input_tensor)
+        # 生成回答（设置 temperature=0.7 以增加多样性）
+        output_ids = generate_response(model, input_tensor, temperature=0.7)
         
         # 解码为中文
         response = decode_ids(output_ids)
@@ -122,11 +124,11 @@ if __name__ == '__main__':
     # 模型参数（必须与训练时一致）
     EMBED_SIZE = 256
     HIDDEN_SIZE = 1024
-    NUM_LAYERS = 1
+    NUM_LAYERS = 2
     DROPOUT = 0.5
     
     # 模型文件路径（根据实际情况修改）
-    model_path = 'model/chat_model.pth'  # 如果放在当前目录可直接用 'chat_model.pth'
+    model_path = 'model/prechat_model.pth'  # 如果放在当前目录可直接用 'chat_model.pth'
     # model_path = 'model/pretrained_model.pth'  # 如果放在当前目录可直接用 'pretrained_model.pth'
     
     # 加载模型
