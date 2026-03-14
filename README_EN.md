@@ -90,8 +90,7 @@ python chat.py
 You can modify the `temperature` parameter in `chat.py` to control the diversity of responses:
 
 ```python
-def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000, temperature=1.0):
-    # ...
+output_ids = generate_response(model, input_tensor, temperature=0.6)
 ```
 
 Type `exit` to quit the chat.
