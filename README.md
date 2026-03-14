@@ -90,7 +90,7 @@ python chat.py
 可以修改 `chat.py` 中的 `temperature` 参数来控制回复的多样性：
 
 ```python
-def generate_response(model: Seq2Seq, input_tensor: torch.Tensor, max_len=1000, temperature=1.0):
+output_ids = generate_response(model, input_tensor, temperature=0.6)
 ```
 
 输入 `exit` 退出聊天。
