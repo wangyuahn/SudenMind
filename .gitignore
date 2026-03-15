@@ -1,0 +1,31 @@
+# Python 字节码文件（你最不想上传的）
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 深度学习模型权重文件（体积大且是生成的，通常不上传）
+# model/*.pth
+model/*.pt
+model/*.bin
+
+# 数据集和预处理数据
+# data/*.json
+# data/vocab.json
+# 如果你的 corpus.txt 很大，建议也不要上传
+# data/corpus.txt
+
+# 虚拟环境
+venv/
+env/
+.env
+.venv
+miniconda3/
+
+# 操作系统临时文件
+.DS_Store
+Thumbs.db
+
+# 编辑器配置
+.vscode/
+.idea/
+*.swp
