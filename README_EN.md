@@ -43,4 +43,4 @@ python chat.py
 
 ```
 
-![Build Status](https://github.com/wangyuahn/SudenMind/actions/workflows/python-package-conda.yml/badge.svg)
+[![SudenMind CI](https://github.com/wangyuahn/SudenMind/actions/workflows/python-package-conda.yml/badge.svg)](https://github.com/wangyuahn/SudenMind/actions)
