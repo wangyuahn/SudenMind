@@ -1,4 +1,5 @@
 ## English Version
+[English](README_EN.md) | [中文版](README.md)
 
 ### 1. Project Overview
 

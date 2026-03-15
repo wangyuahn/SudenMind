@@ -1,6 +1,6 @@
 # SudenMind Transformer Chatbot
 
-[English](https://www.google.com/search?q=%23english-version) | [中文版](https://www.google.com/search?q=%23%E4%B8%AD%E6%96%87%E7%89%88)
+[English](README_EN.md) | [中文版](README.md)
 
 ---
 
