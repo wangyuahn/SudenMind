@@ -1,4 +1,4 @@
-name: SudenMind CI (Conda)
+name: SudenMind CI (Conda + Pip)
 
 on:
   push:
@@ -9,8 +9,6 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 5
 
     steps:
     - uses: actions/checkout@v4
@@ -26,27 +24,24 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        # 更新 Conda 环境并安装必要库
+        # 1. 先用 Conda 安装 PyTorch (CPU版比较快)
         conda install -y pytorch cpuonly -c pytorch
-        conda install -y jieba
-        pip install flake8 pytest
+        # 2. 必须用 pip 安装 jieba
+        pip install jieba flake8 pytest
 
     - name: Lint with flake8
       run: |
-        # 语法错误检查
+        # 语法错误检查，针对你重构后的代码进行静态扫描
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # 风格建议（设置为 exit-zero 不会因风格问题中断构建）
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Validate Preprocessing Logic
+    - name: Test Preprocessing & Model Architecture
       run: |
-        # 运行数据处理脚本，确保逻辑没有 Bug（哪怕没有 corpus.txt，脚本也应能处理异常）
-        # 如果你想在 CI 中运行测试，可以创建一个测试语料
+        # 创建临时测试语料，验证 process.py 是否能跑通
         mkdir -p data
         echo -e "你好\t你好呀" > data/corpus.txt
         python process.py
         
-    - name: Test Architecture
-      run: |
-        # 尝试初始化模型，确保代码没有 import 错误或维度冲突
-        python -c "from model import SudenMind; m = SudenMind(100, 256, 512, 100); print('Model built successfully')"
+        # 验证模型初始化和前向传播（Dummy Input）
+        # 确保重构后的维度对齐没有问题
+        python -c "import torch; from model import SudenMind; m = SudenMind(100, 256, 512, 100); x = torch.randint(0, 100, (10, 2)); out = m(x); print('Model check passed!')"
