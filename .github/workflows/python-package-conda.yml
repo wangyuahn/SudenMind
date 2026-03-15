@@ -1,0 +1,52 @@
+name: SudenMind CI (Conda)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Add conda to system path
+      run: |
+        echo $CONDA/bin >> $GITHUB_PATH
+
+    - name: Install Dependencies
+      run: |
+        # 更新 Conda 环境并安装必要库
+        conda install -y pytorch cpuonly -c pytorch
+        conda install -y jieba
+        pip install flake8 pytest
+
+    - name: Lint with flake8
+      run: |
+        # 语法错误检查
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # 风格建议（设置为 exit-zero 不会因风格问题中断构建）
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Validate Preprocessing Logic
+      run: |
+        # 运行数据处理脚本，确保逻辑没有 Bug（哪怕没有 corpus.txt，脚本也应能处理异常）
+        # 如果你想在 CI 中运行测试，可以创建一个测试语料
+        mkdir -p data
+        echo -e "你好\t你好呀" > data/corpus.txt
+        python process.py
+        
+    - name: Test Architecture
+      run: |
+        # 尝试初始化模型，确保代码没有 import 错误或维度冲突
+        python -c "from model import SudenMind; m = SudenMind(100, 256, 512, 100); print('Model built successfully')"
