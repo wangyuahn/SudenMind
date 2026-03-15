@@ -42,3 +42,5 @@ python train.py
 python chat.py
 
 ```
+
+![Build Status](https://github.com/wangyuahn/SudenMind/actions/workflows/python-package-conda.yml/badge.svg)
