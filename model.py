@@ -30,7 +30,7 @@ class SudenMind(nn.Module):
             nhead=8, 
             dim_feedforward=hidden_dim,
             batch_first=False,
-            dropout=0.1,
+            dropout=0.3,
             norm_first=True  # 开启 Pre-LN 提升训练稳定性
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=6)

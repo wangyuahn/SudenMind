@@ -5,16 +5,17 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from datasets import ChatDataset, collate_ChatDataset_batch
 from model import SudenMind
+from safetensors.torch import save_file
 
 class Trainer:
-    def __init__(self, model, train_loader: torch.utils.data.DataLoader, device):
+    def __init__(self, model, train_loader: torch.utils.data.DataLoader, device: torch.device, lr: float=1e-5):
         self.model = model.to(device)
         self.train_loader = train_loader
         self.device = device
         self.criterion = nn.CrossEntropyLoss(ignore_index=0)
         
         # 使用 1e-4 的学习率
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-5)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-5)
         
         # 增加 Warmup 预热机制
         warmup_steps = 200
@@ -26,7 +27,7 @@ class Trainer:
         
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=2)
 
-    def train_epoch(self, epoch_num: int, patience: int=10):
+    def train_epoch(self, epoch_num: int, patience: int=10, target_loss: float=0.5):
         self.model.train()
         best_loss = float('inf')
         counter = 0
@@ -64,9 +65,18 @@ class Trainer:
             current_lr = self.optimizer.param_groups[0]['lr']
             print(f"Epoch {epoch+1}/{epoch_num} - Loss: {avg_loss:.4f} - LR: {current_lr:.2E}")
             
-            if avg_loss < best_loss:
+            if avg_loss <= target_loss:
+                print(f"目标损失 {target_loss} 已达到，提前停止训练。")
+                torch.save(self.model.state_dict(), 'model/sudenmind.pth')
+                tensors = model.state_dict()
+                save_file(tensors, "model/sudenmind.safetensors")
+                print(f"-> Best model saved - Loss: {avg_loss:.4f}")
+                break
+            elif avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(self.model.state_dict(), 'model/sudenmind.pth')
+                tensors = model.state_dict()
+                save_file(tensors, "model/sudenmind.safetensors")
                 print(f"-> Best model saved - Loss: {best_loss:.4f}")
                 counter = 0
             else:
@@ -74,7 +84,7 @@ class Trainer:
                 if counter >= patience:
                     print(f"Early stopping at epoch {epoch+1}")
                     break
-
+            
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -103,5 +113,5 @@ if __name__ == "__main__":
         collate_fn=collate_ChatDataset_batch
     )
     
-    trainer = Trainer(model, chat_data, device)
+    trainer = Trainer(model, chat_data, device=device)
     trainer.train_epoch(200)

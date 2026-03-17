@@ -42,7 +42,7 @@ def chat():
 
     # 4. 交互循环
     while True:
-        user_input = input("\n你: ")
+        user_input = input("你: ")
         
         # 退出指令
         if user_input.lower() in ['quit', 'exit', '退出']:
@@ -72,8 +72,8 @@ def chat():
             # temperature 控制随机性：越接近0越固定，越接近1越有创意
             output_tensor = model.generate(
                 input_seq=input_tensor, 
-                max_length=50, 
-                temperature=0.8, 
+                max_length=500, 
+                temperature=0.6, 
                 device=device
             )
         
@@ -84,11 +84,13 @@ def chat():
         response_words = []
         for idx in generated_ids:
             if idx == eos_id:  # 遇到 <EOS> 代表模型认为话说完了
-                break
+                # break
+                # generate 方法已经处理了 max_length 和 <EOS> 的逻辑，这里不需要再 break 了
+                pass
                 
             word = id2word.get(str(idx), '<UNK>')
             # 过滤掉特殊的控制字符
-            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>', '<SEP>']:
+            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>', '<SEP>'] or True:
                 response_words.append(word)
         
         response_text = "".join(response_words)
