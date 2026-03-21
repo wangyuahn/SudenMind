@@ -96,7 +96,7 @@ class Trainer:
         self.train_loader = train_loader
         self.device = device
         self.vocab_size = vocab_size
-        self.use_amp = torch.cuda.is_available()
+        self.use_amp = torch.cuda.is_available() and train_cfg['use_amp'] == True
         self.scaler = GradScaler('cuda') if self.use_amp else None
         
         # Label Smoothing + CrossEntropy
