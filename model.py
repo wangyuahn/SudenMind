@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from typing import List, cast, Optional, Dict
+from typing import List, cast, Optional
 
 
 class AttnRes(nn.Module):
@@ -204,9 +204,9 @@ class SudenMind(nn.Module):
             d_model=embedding_dim,
             d_fnn=hidden_dim,
             nhead=8,
-            dropout=0.3,
+            dropout=0.1,  # 从 0.3 降低到 0.1，数据质量高了不需要太强正则
             n_layers=6,
-            batch_fire=False  # 默认使用顺序模式
+            batch_fire=False
         )
 
         self.fc = nn.Sequential(
