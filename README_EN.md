@@ -7,7 +7,9 @@
 </p>
 
 <p align="center">
-  <b>English</b> | <a href="README.md">中文</a>
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/📖-中文版本-2ea44f?style=for-the-badge">
+  </a>
 </p>
 
 SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** [[1]](#references) architecture. It features a Decoder-Only design with cross-layer residual connections, learnable positional encodings, and optimizations for Chinese conversation tasks.
