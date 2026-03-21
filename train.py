@@ -229,4 +229,4 @@ if __name__ == "__main__":
     )
     
     trainer = Trainer(model, chat_data, device=device, vocab_size=vocab_size, lr=train_cfg['lr'])
-    # trainer.train_epoch(epoch_num=500, patience=30, target_loss=0.2)
+    trainer.train_epoch(epoch_num=500, patience=30, target_loss=0.2)
