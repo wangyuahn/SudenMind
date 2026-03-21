@@ -12,7 +12,7 @@
   </a>
 </p>
 
-SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** [[1]](#references) architecture. It features a Decoder-Only design with cross-layer residual connections, learnable positional encodings, and optimizations for Chinese conversation tasks.
+SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)**  architecture. It features a Decoder-Only design with cross-layer residual connections, learnable positional encodings, and optimizations for Chinese conversation tasks.
 
 ---
 
