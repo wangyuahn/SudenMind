@@ -1,6 +1,12 @@
 import jieba
 import json
 import os
+import sys
+from typing import List
+
+# 添加项目根目录到路径，以便导入 datasets
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from datasets import sentence_to_ids, ids_to_words
 
 def tokenize_chinese(text):
     """返回分词后的列表"""
@@ -28,21 +34,22 @@ class Vocab:
     def __len__(self):
         return len(self.word2id)
     
-    def encode(self, sentence, add_special=True):
-        tokens = tokenize_chinese(sentence)
-        ids = [self.word2id.get(tok, self.word2id['<UNK>']) for tok in tokens]
+    def encode(self, sentence, add_special=True) -> List[int]:
+        """将句子编码为 ID 序列"""
+        ids: List[int] = sentence_to_ids(sentence, self.word2id)
         if add_special:
             ids = [self.word2id['<SOS>']] + ids + [self.word2id['<EOS>']]
         return ids
     
     def decode(self, ids, skip_special=True):
-        words = []
-        for i in ids:
-            w = self.id2word.get(i, '<UNK>')
-            if skip_special and w in ('<PAD>','<UNK>','<SOS>','<EOS>','<SEP>'):
-                continue
-            words.append(w)
-        return ''.join(words)
+        """将 ID 序列解码为句子"""
+        # 过滤特殊字符
+        filtered_ids = ids
+        if skip_special:
+            special_ids = {self.word2id.get(t) for t in ['<PAD>','<UNK>','<SOS>','<EOS>','<SEP>'] if self.word2id.get(t) is not None}
+            filtered_ids = [i for i in ids if i not in special_ids]
+        words = ids_to_words(filtered_ids, self.id2word)
+        return "".join(words)
 
 if __name__ == "__main__":
     if not os.path.exists('data'):

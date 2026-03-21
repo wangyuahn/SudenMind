@@ -1,8 +1,8 @@
 import torch
 import json
-import jieba
 import os
 from model import SudenMind
+from datasets import sentence_to_ids, ids_to_words
 
 def chat():
     # 检测设备
@@ -19,7 +19,8 @@ def chat():
         vocab_data = json.load(f)
         
     word2id = vocab_data['word2id']
-    id2word = vocab_data['id2word']
+    # json 加载后键是字符串，需要转换为 int
+    id2word = {int(k): v for k, v in vocab_data['id2word'].items()}
     vocab_size = len(word2id)
 
     # 2. 初始化模型架构 (参数需与 train.py 保持完全一致)
@@ -54,8 +55,7 @@ def chat():
             continue
 
         # 第一步：分词并转换为 ID
-        tokens = list(jieba.cut(user_input, HMM=True))
-        input_ids = [word2id.get(tok, word2id.get('<UNK>', 1)) for tok in tokens]
+        input_ids = sentence_to_ids(user_input, word2id)
         
         # 第二步：构造 Prompt 序列 -> [SOS] + 问题 + [SEP]
         sos_id = word2id.get('<SOS>', 2)
@@ -81,18 +81,8 @@ def chat():
         # output_tensor 的形状是 (1, total_seq_len)，我们要截取掉前面的 prompt 部分
         generated_ids = output_tensor[0][len(prompt_ids):].tolist()
         
-        response_words = []
-        for idx in generated_ids:
-            if idx == eos_id:  # 遇到 <EOS> 代表模型认为话说完了
-                # break
-                # generate 方法已经处理了 max_length 和 <EOS> 的逻辑，这里不需要再 break 了
-                pass
-                
-            word = id2word.get(str(idx), '<UNK>')
-            # 过滤掉特殊的控制字符
-            if word not in ['<PAD>', '<UNK>', '<SOS>', '<EOS>', '<SEP>'] or True:
-                response_words.append(word)
-        
+        # 使用 ids_to_words 解码
+        response_words = ids_to_words(generated_ids, id2word)
         response_text = "".join(response_words)
         print(f"SudenMind: {response_text}")
 
