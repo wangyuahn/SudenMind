@@ -12,7 +12,7 @@
   </a>
 </p>
 
-SudenMind 是一个基于 **AttnRes (Attention with Residual)** [[1]](#references) 架构的中文对话生成模型。采用 Decoder-Only 设计，支持跨层残差连接，使用可学习位置编码，针对中文对话场景优化。
+SudenMind 是一个基于 **AttnRes (Attention with Residual)**  架构的中文对话生成模型。采用 Decoder-Only 设计，支持跨层残差连接，使用可学习位置编码，针对中文对话场景优化。
 
 ---
 
