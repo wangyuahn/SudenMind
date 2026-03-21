@@ -1,0 +1,51 @@
+{
+  "model": {
+    "d_model": 256,
+    "d_fnn": 512,
+    "nhead": 8,
+    "n_layers": 6,
+    "dropout": 0.1,
+    "batch_fire": false,
+    "max_position_embeddings": 5000
+  },
+  "training": {
+    "lr": 0.001,
+    "weight_decay": 0.01,
+    "betas": [0.9, 0.95],
+    "eps": 1e-08,
+    "warmup_ratio": 0.15,
+    "max_epochs": 500,
+    "label_smoothing": 0.05,
+    "ignore_index": 0,
+    "batch_size": 64,
+    "max_norm": 1.0,
+    "patience": 30,
+    "target_loss": 0.2,
+    "use_amp": true
+  },
+  "data": {
+    "corpus_file": "data/corpus.txt",
+    "vocab_file": "data/vocab.json",
+    "train_data_file": "data/chat_data.json",
+    "max_seq_len": 512,
+    "min_freq": 1,
+    "pad_id": 0,
+    "unk_id": 1,
+    "sos_id": 2,
+    "eos_id": 3,
+    "sep_id": 4
+  },
+  "generation": {
+    "max_length": 100,
+    "temperature": 0.6,
+    "top_k": 5,
+    "top_p": 1.0,
+    "onnx_seq_len": 32,
+    "onnx_opset": 14
+  },
+  "paths": {
+    "model_dir": "model",
+    "model_name": "sudenmind.pth",
+    "onnx_name": "sudenmind.onnx"
+  }
+}

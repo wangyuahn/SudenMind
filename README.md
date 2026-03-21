@@ -73,6 +73,7 @@ output = fnn_out + res_out
 
 ```
 SudenMind/
+├── config.json             # ⭐ 超参数配置文件 (集中管理所有参数)
 ├── data/
 │   ├── corpus.txt          # 原始语料 (问题\t回答)
 │   ├── chat_data.json      # 处理后的训练数据
@@ -85,6 +86,38 @@ SudenMind/
 ├── train.py                # 训练脚本 (支持混合精度)
 ├── chat.py                 # 交互式对话
 └── README.md               # 本文件
+```
+
+---
+
+## ⚙️ 配置说明
+
+所有超参数集中在 `config.json` 中管理，**无需修改代码**即可调整：
+
+```json
+{
+  "model": {
+    "d_model": 256,        // Embedding 维度
+    "d_fnn": 512,          // 前馈网络维度
+    "nhead": 8,            // 注意力头数
+    "n_layers": 6,         // 层数
+    "dropout": 0.1
+  },
+  "training": {
+    "lr": 0.001,           // 学习率
+    "batch_size": 64,      // 批量大小
+    "max_epochs": 500,     // 最大训练轮数
+    "patience": 30,        // 早停耐心值
+    "target_loss": 0.2,    // 目标损失
+    "label_smoothing": 0.05,
+    "use_amp": true        // 是否使用混合精度
+  },
+  "generation": {
+    "max_length": 100,     // 最大生成长度
+    "temperature": 0.6,    // 采样温度
+    "top_k": 5
+  }
+}
 ```
 
 ---

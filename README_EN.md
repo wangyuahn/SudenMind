@@ -72,6 +72,7 @@ output = fnn_out + res_out
 
 ```
 SudenMind/
+├── config.json             # ⭐ Centralized hyperparameter configuration
 ├── data/
 │   ├── corpus.txt          # Raw corpus (Question\tAnswer)
 │   ├── chat_data.json      # Processed training data
@@ -84,6 +85,38 @@ SudenMind/
 ├── train.py                # Training script (supports mixed precision)
 ├── chat.py                 # Interactive chat interface
 └── README_EN.md            # This file
+```
+
+---
+
+## ⚙️ Configuration
+
+All hyperparameters are managed in `config.json`. **No code modification needed**:
+
+```json
+{
+  "model": {
+    "d_model": 256,        // Embedding dimension
+    "d_fnn": 512,          // Feed-forward dimension
+    "nhead": 8,            // Number of attention heads
+    "n_layers": 6,         // Number of layers
+    "dropout": 0.1
+  },
+  "training": {
+    "lr": 0.001,           // Learning rate
+    "batch_size": 64,      // Batch size
+    "max_epochs": 500,     // Max training epochs
+    "patience": 30,        // Early stopping patience
+    "target_loss": 0.2,    // Target loss
+    "label_smoothing": 0.05,
+    "use_amp": true        // Enable mixed precision
+  },
+  "generation": {
+    "max_length": 100,     // Max generation length
+    "temperature": 0.6,    // Sampling temperature
+    "top_k": 5
+  }
+}
 ```
 
 ---

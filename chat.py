@@ -4,6 +4,11 @@ import os
 from model import SudenMind
 from datasets import sentence_to_ids, ids_to_words
 
+# 加载配置
+cfg = json.load(open('config.json', 'r', encoding='utf-8'))
+model_cfg = cfg['model']
+gen_cfg = cfg['generation']
+
 def chat():
     # 检测设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -23,9 +28,9 @@ def chat():
     id2word = {int(k): v for k, v in vocab_data['id2word'].items()}
     vocab_size = len(word2id)
 
-    # 2. 初始化模型架构 (参数需与 train.py 保持完全一致)
-    embedding_dim = 256
-    hidden_dim = 512
+    # 2. 初始化模型架构 (参数从 config.json 读取，需与 train.py 保持一致)
+    embedding_dim = model_cfg['d_model']
+    hidden_dim = model_cfg['d_fnn']
     output_dim = vocab_size
     
     model = SudenMind(vocab_size, embedding_dim, hidden_dim, output_dim).to(device)
@@ -72,8 +77,8 @@ def chat():
             # temperature 控制随机性：越接近0越固定，越接近1越有创意
             output_tensor = model.generate(
                 input_seq=input_tensor, 
-                max_length=500, 
-                temperature=0.6, 
+                max_length=gen_cfg['max_length'], 
+                temperature=gen_cfg['temperature'], 
                 device=device
             )
         
