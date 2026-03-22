@@ -19,6 +19,7 @@ SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attenti
 ## ✨ Key Features
 
 - **AttnRes Architecture**: Each layer can dynamically attend to outputs from all previous layers, enabling richer information flow
+- **MoE (Mixture of Experts) Integration**: All FFN layers replaced with MoE layers, 4 experts, top_k=2, increasing model capacity
 - **Decoder-Only Design**: Standard autoregressive generation suitable for dialogue tasks
 - **Learnable Positional Encoding**: More flexible than fixed sinusoidal encoding, adapts to different sequence lengths
 - **Mixed Precision Training**: FP16 acceleration, saves memory, supports AMD ROCm
@@ -40,7 +41,7 @@ AttnRes Decoder × 6
   ├─ Self-Attention (with causal mask)
   ├─ Cross-Layer Residual Attention (AttnRes) ← Core Innovation
   │   └─ Each layer dynamically selects from all previous layer outputs via softmax attention
-  └─ Feed-Forward Network
+  └─ MoE Feed-Forward Network (4 experts, top_k=2) ← Forced MoE Integration
     ↓
 Linear → Softmax
     ↓
@@ -59,12 +60,29 @@ res_out = sum(attn_weights[i] * prev_outputs[i] for i in range(n))
 output = fnn_out + res_out
 ```
 
+**MoE (Mixture of Experts) Integration**:
+All FFN layers are forcibly replaced with MoE layers, each containing 4 expert networks, with each token activating only top_k=2 experts:
+```python
+# Original FFN layer
+output = ffn(x)
+
+# New MoE layer
+router_output = router(x)  # Compute expert weights
+selected_experts = top_k(router_output, k=2)  # Select top-2 experts
+output = sum(selected_experts[i] * expert_i(x) for i in range(2))
+aux_loss = load_balancing_loss(router_output)  # Auxiliary loss for expert load balancing
+```
+MoE increases model capacity through sparse activation without significantly increasing computational cost, suitable for large-scale language models.
+
 **Key Parameters** (modifiable):
 - `d_model`: 256 (embedding dimension)
 - `nhead`: 8 (number of attention heads)
 - `d_fnn`: 512 (feed-forward network dimension)
 - `n_layers`: 6 (number of AttnRes layers)
 - `dropout`: 0.1
+- `num_experts`: 4 (MoE number of experts)
+- `top_k`: 2 (number of experts activated per token)
+- `aux_loss_coef`: 0.01 (MoE auxiliary loss coefficient)
 
 ---
 
@@ -100,7 +118,10 @@ All hyperparameters are managed in `config.json`. **No code modification needed*
     "d_fnn": 512,          // Feed-forward dimension
     "nhead": 8,            // Number of attention heads
     "n_layers": 6,         // Number of layers
-    "dropout": 0.1
+    "dropout": 0.1,
+    "num_experts": 4,      // MoE number of experts
+    "top_k": 2,            // Number of experts activated per token
+    "aux_loss_coef": 0.01  // MoE auxiliary loss coefficient
   },
   "training": {
     "lr": 0.001,           // Learning rate

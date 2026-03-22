@@ -19,6 +19,7 @@ SudenMind 是一个基于 **AttnRes (Attention with Residual)**  架构的中文
 ## ✨ 核心特性
 
 - **AttnRes 架构**：每层可动态关注之前所有层的输出，信息流动更丰富
+- **MoE (混合专家) 集成**：所有 FFN 层替换为 MoE 层，4 个专家，top_k=2，提升模型容量
 - **Decoder-Only 设计**：标准自回归生成，适合对话任务
 - **可学习位置编码**：比固定正弦编码更灵活，适应不同长度
 - **混合精度训练**：FP16 加速，节省显存，支持 AMD ROCm
@@ -40,7 +41,7 @@ AttnRes Decoder × 6
   ├─ 自注意力 (带因果掩码)
   ├─ 跨层残差注意力 (AttnRes) ← 核心创新
   │   └─ 每层通过 softmax attention 动态选择之前所有层的输出
-  └─ 前馈网络
+  └─ MoE 前馈网络 (4 个专家，top_k=2) ← 强制 MoE 集成
     ↓
 Linear → Softmax
     ↓
@@ -59,6 +60,20 @@ res_out = sum(attn_weights[i] * prev_outputs[i] for i in range(n))
 output = fnn_out + res_out
 ```
 
+**MoE (混合专家) 集成**：
+所有 FFN 层被强制替换为 MoE 层，每个 MoE 层包含 4 个专家网络，每个 token 只激活 top_k=2 个专家：
+```python
+# 原 FFN 层
+output = ffn(x)
+
+# 新 MoE 层
+router_output = router(x)  # 计算专家权重
+selected_experts = top_k(router_output, k=2)  # 选择 top-2 专家
+output = sum(selected_experts[i] * expert_i(x) for i in range(2))
+aux_loss = load_balancing_loss(router_output)  # 辅助损失，平衡专家负载
+```
+MoE 通过稀疏激活增加模型容量而不显著增加计算成本，适合大规模语言模型。
+
 **关键参数**（可修改）：
 - `d_model`: 256 (embedding 维度)
 - `nhead`: 8 (注意力头数)
@@ -66,6 +81,9 @@ output = fnn_out + res_out
 - `n_layers`: 6 (AttnRes 层数)
 - `dropout`: 0.1
 - `batch_fire`: False (当前使用顺序模式，非 Block AttnRes)
+- `num_experts`: 4 (MoE 专家数量)
+- `top_k`: 2 (每个 token 激活的专家数)
+- `aux_loss_coef`: 0.01 (MoE 辅助损失系数)
 
 ---
 
@@ -101,7 +119,10 @@ SudenMind/
     "d_fnn": 512,          // 前馈网络维度
     "nhead": 8,            // 注意力头数
     "n_layers": 6,         // 层数
-    "dropout": 0.1
+    "dropout": 0.1,
+    "num_experts": 4,      // MoE 专家数量
+    "top_k": 2,            // 每个 token 激活的专家数
+    "aux_loss_coef": 0.01  // MoE 辅助损失系数
   },
   "training": {
     "lr": 0.001,           // 学习率

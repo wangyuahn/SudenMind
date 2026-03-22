@@ -44,4 +44,4 @@ jobs:
         
         # 验证模型初始化和前向传播（Dummy Input）
         # 确保重构后的维度对齐没有问题
-        python -c "import torch; from model import SudenMind; m = SudenMind(100, 256, 512, 100); x = torch.randint(0, 100, (10, 2)); out = m(x); print('Model check passed!')"
+        python -c "import torch; from model import SudenMind; m = SudenMind(100, 256, 512, 100, num_experts=4, top_k=2, aux_loss_coef=0.01); x = torch.randint(0, 100, (10, 2)); out = m(x); print('Model check passed!')"
