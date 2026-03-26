@@ -9,7 +9,10 @@
         "max_position_embeddings": 5000,
         "num_experts": 4,
         "top_k": 2,
-        "aux_loss_coef": 0.01
+        "aux_loss_coef": 0.01,
+        "bert_model_name": "bert-base-chinese",
+        "freeze_bert": true,
+        "bert_hidden_dim": 768
     },
   "training": {
     "lr": 0.001,
@@ -20,18 +23,18 @@
     "max_epochs": 500,
     "label_smoothing": 0.05,
     "ignore_index": 0,
-    "batch_size": 64,
+    "batch_size": 8, 
     "max_norm": 1.0,
     "patience": 30,
     "target_loss": 0.2,
     "use_amp": true
   },
   "data": {
-    "corpus_file": "data/corpus.txt",
-    "vocab_file": "data/vocab.json",
-    "train_data_file": "data/chat_data.json",
-    "max_seq_len": 512,
-    "min_freq": 1,
+    "dataset_name": "lccc",
+    "config": "base",
+    "split": "train",
+    "max_history": 4, 
+    "max_seq_len": 256,  
     "pad_id": 0,
     "unk_id": 1,
     "sos_id": 2,
@@ -40,15 +43,17 @@
   },
   "generation": {
     "max_length": 100,
-    "temperature": 0.6,
+    "temperature": 2.0,
     "top_k": 5,
     "top_p": 1.0,
     "onnx_seq_len": 32,
-    "onnx_opset": 14
+    "onnx_opset": 11
   },
   "paths": {
     "model_dir": "model",
     "model_name": "sudenmind.pth",
-    "onnx_name": "sudenmind.onnx"
+    "onnx_name": "sudenmind.onnx",
+    "data_raw_dir": "data/raw",
+    "data_processed_dir": "data/processed"
   }
 }

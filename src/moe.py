@@ -1,18 +1,3 @@
-"""
-Mixture of Experts (MoE) 实现
-
-MoE (混合专家) 是一种稀疏激活的神经网络架构，通过将模型分解为多个专家网络，
-每个输入 token 只激活少数专家，从而在不显著增加计算成本的情况下增加模型容量。
-
-核心特性：
-1. 稀疏激活：每个 token 只激活 top_k 个专家
-2. 负载均衡：通过辅助损失确保专家负载均衡
-3. 可扩展性：专家数量可配置，支持大规模模型
-
-作者：SudenMind 团队
-版本：1.0
-"""
-
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -20,30 +5,14 @@ from typing import Optional, Tuple
 
 
 class Expert(nn.Module):
-    """
-    单个专家网络
-
-    每个专家是一个简单的多层感知机 (MLP)，包含：
-    1. 线性层扩展维度 (d_model → d_ff)
-    2. GELU 激活函数
-    3. Dropout 正则化
-    4. 线性层压缩维度 (d_ff → d_model)
-    5. Dropout 正则化
-
-    参数：
-        d_model: 输入/输出维度
-        d_ff: 中间层维度 (通常比 d_model 大)
-        dropout: Dropout 概率
-    """
-
     def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(d_model, d_ff),  # 扩展维度
-            nn.GELU(),  # GELU 激活函数 (比 ReLU 更平滑)
-            nn.Dropout(dropout),  # Dropout 正则化
-            nn.Linear(d_ff, d_model),  # 压缩回原始维度
-            nn.Dropout(dropout),  # Dropout 正则化
+            nn.Linear(d_model, d_ff),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model),
+            nn.Dropout(dropout),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -210,28 +179,40 @@ class MoELayer(nn.Module):
             self.aux_loss = None  # 推理时不计算辅助损失
 
         # ========== 6. 处理每个专家的计算 ==========
+        # 更高效的实现：批量处理每个专家的计算
         for expert_idx, expert in enumerate(self.experts):
-            # 找到使用当前专家的 token 位置
-            mask = (top_k_indices == expert_idx).any(dim=-1)
-            # mask: [batch_size, seq_len] (布尔张量)
+            # 找到使用当前专家的所有 token
+            # mask: [batch_size, seq_len, top_k] 表示每个位置是否选择了该专家
+            expert_mask = top_k_indices == expert_idx
 
-            if mask.any():  # 如果有 token 选择了这个专家
-                # 获取这些 token 的输入
-                expert_input = x[mask]  # [num_selected_tokens, d_model]
+            if expert_mask.any():
+                # 获取选择该专家的所有 token 位置
+                batch_indices, seq_indices, k_indices = torch.where(expert_mask)
 
-                # 获取对应的路由权重 (简化处理)
-                expert_weight = top_k_probs[mask]
+                if len(batch_indices) > 0:
+                    # 收集这些 token 的输入
+                    token_indices = batch_indices * seq_len + seq_indices
+                    expert_inputs = x.view(-1, d_model)[
+                        token_indices
+                    ]  # [num_tokens, d_model]
 
-                # 专家前向传播
-                expert_output = expert(expert_input)  # [num_selected_tokens, d_model]
+                    # 收集对应的权重
+                    expert_weights = top_k_probs[
+                        batch_indices, seq_indices, k_indices
+                    ]  # [num_tokens]
 
-                # 加权并累加到输出
-                if expert_weight.dim() > 1:
-                    weight = expert_weight.view(-1, 1)  # 保持权重维度
-                else:
-                    weight = expert_weight.mean().view(1, 1)  # 平均权重
+                    # 批量计算专家输出
+                    expert_outputs = expert(expert_inputs)  # [num_tokens, d_model]
 
-                output[mask] += expert_output * weight
+                    # 加权输出
+                    weighted_outputs = expert_outputs * expert_weights.unsqueeze(
+                        1
+                    )  # [num_tokens, d_model]
+
+                    # 将结果累加到输出中
+                    # 使用 index_add_ 进行高效累加
+                    output_flat = output.view(-1, d_model)
+                    output_flat.index_add_(0, token_indices, weighted_outputs)
 
         return output
 

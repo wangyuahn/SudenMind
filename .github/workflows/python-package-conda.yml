@@ -1,4 +1,4 @@
-name: SudenMind CI (Conda + Pip)
+name: SudenMind CI (LCCC-base + Conda)
 
 on:
   push:
@@ -26,22 +26,87 @@ jobs:
       run: |
         # 1. 先用 Conda 安装 PyTorch (CPU版比较快)
         conda install -y pytorch cpuonly -c pytorch
-        # 2. 必须用 pip 安装 jieba
-        pip install jieba flake8 pytest
+        # 2. 安装 transformers 和 datasets 库
+        pip install transformers datasets flake8 pytest
 
     - name: Lint with flake8
       run: |
-        # 语法错误检查，针对你重构后的代码进行静态扫描
+        # 语法错误检查
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Test Preprocessing & Model Architecture
+    - name: Test LCCC Dataset Loading
       run: |
-        # 创建临时测试语料，验证 process.py 是否能跑通
-        mkdir -p data
-        echo -e "你好\t你好呀" > data/corpus.txt
-        python process.py
-        
-        # 验证模型初始化和前向传播（Dummy Input）
-        # 确保重构后的维度对齐没有问题
-        python -c "import torch; from model import SudenMind; m = SudenMind(100, 256, 512, 100, num_experts=4, top_k=2, aux_loss_coef=0.01); x = torch.randint(0, 100, (10, 2)); out = m(x); print('Model check passed!')"
+        # 测试LCCC数据集加载
+        python -c "
+from datasets import load_dataset
+print('测试LCCC数据集加载...')
+dataset = load_dataset('lccc', 'base', split='train[:10]')
+print(f'✓ LCCC数据集加载成功，样本数: {len(dataset)}')
+print(f'  数据集特征: {list(dataset.features.keys())}')
+if len(dataset) > 0:
+    sample = dataset[0]
+    print(f'  样本对话长度: {len(sample[\"dialog\"])}')
+    print(f'  第一句话: {sample[\"dialog\"][0][:50]}...')
+print('LCCC数据集测试通过！')
+        "
+
+    - name: Test Model Architecture
+      run: |
+        # 验证模型初始化和前向传播
+        python -c "
+import torch
+from model import SudenMind
+print('测试模型架构...')
+# BERT中文词表大小
+vocab_size = 21128
+model = SudenMind(
+    vocab_size=vocab_size,
+    embedding_dim=256,
+    hidden_dim=512,
+    output_dim=vocab_size,
+    bert_model_name='bert-base-chinese',
+    freeze_bert=True,
+    num_experts=4,
+    top_k=2,
+    aux_loss_coef=0.01
+)
+print(f'✓ 模型创建成功')
+print(f'  总参数: {sum(p.numel() for p in model.parameters()):,}')
+print(f'  可训练参数: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}')
+
+# 测试前向传播
+batch_size = 2
+seq_len = 50
+test_input = torch.randint(100, 1000, (batch_size, seq_len))
+with torch.no_grad():
+    output = model(test_input)
+print(f'✓ 前向传播测试通过')
+print(f'  输入形状: {test_input.shape}')
+print(f'  输出形状: {output.shape}')
+print('模型测试通过！')
+        "
+
+    - name: Test Dataset Classes
+      run: |
+        # 测试数据集类
+        python -c "
+from data_utils import LCCCDataset
+from transformers import BertTokenizer
+print('测试LCCCDataset类...')
+tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+dataset = LCCCDataset(
+    split='train',
+    config='base',
+    max_history=5,
+    max_length=128,
+    tokenizer_name='bert-base-chinese',
+    test_mode=True
+)
+print(f'✓ LCCCDataset创建成功，大小: {len(dataset)}')
+if len(dataset) > 0:
+    sample = dataset[0]
+    print(f'  样本输入形状: {sample[\"input_ids\"].shape}')
+    print(f'  样本标签形状: {sample[\"labels\"].shape}')
+print('数据集类测试通过！')
+        "
