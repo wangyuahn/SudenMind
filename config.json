@@ -23,7 +23,7 @@
     "max_epochs": 500,
     "label_smoothing": 0.05,
     "ignore_index": 0,
-    "batch_size": 8, 
+    "batch_size": 12, 
     "max_norm": 1.0,
     "patience": 30,
     "target_loss": 0.2,
