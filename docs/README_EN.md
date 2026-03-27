@@ -12,7 +12,7 @@
   </a>
 </p>
 
-SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)**  architecture. It features a Decoder-Only design with cross-layer residual connections, learnable positional encodings, and optimizations for Chinese conversation tasks.
+SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)**  architecture. It features an Encoder-Decoder design with BERT as encoder, cross-layer residual connections, and optimizations for Chinese conversation tasks.
 
 ---
 
@@ -20,7 +20,7 @@ SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attenti
 
 - **AttnRes Architecture**: Each layer can dynamically attend to outputs from all previous layers, enabling richer information flow
 - **MoE (Mixture of Experts) Integration**: All FFN layers replaced with MoE layers, 4 experts, top_k=2, increasing model capacity
-- **Decoder-Only Design**: Standard autoregressive generation suitable for dialogue tasks
+- **Encoder-Decoder Design**: Uses BERT as encoder and AttnRes as decoder, enhancing semantic understanding capability
 - **Learnable Positional Encoding**: More flexible than fixed sinusoidal encoding, adapts to different sequence lengths
 - **Mixed Precision Training**: FP16 acceleration, saves memory, supports AMD ROCm
 - **ONNX Export**: Export to ONNX format for deployment and visualization with Netron
@@ -30,12 +30,15 @@ SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attenti
 
 ## 🏗️ Model Architecture
 
-Based on [Attention Residuals](https://arxiv.org/abs/2603.15031) Decoder-Only architecture:
+Based on [Attention Residuals](https://arxiv.org/abs/2603.15031) Encoder-Decoder architecture:
 
 ```
 Input (batch, seq_len)
     ↓
-Embedding + Learnable Positional Encoding
+BERT Encoder (optional frozen)
+  └─ Pre-trained BERT model for semantic feature extraction
+    ↓
+BERT Adapter (768 → embedding_dim)
     ↓
 AttnRes Decoder × 6
   ├─ Self-Attention (with causal mask)
@@ -76,13 +79,16 @@ MoE increases model capacity through sparse activation without significantly inc
 
 **Key Parameters** (modifiable):
 - `d_model`: 256 (embedding dimension)
-- `nhead`: 8 (number of attention heads)
 - `d_fnn`: 512 (feed-forward network dimension)
+- `nhead`: 8 (number of attention heads)
 - `n_layers`: 6 (number of AttnRes layers)
 - `dropout`: 0.1
 - `num_experts`: 4 (MoE number of experts)
 - `top_k`: 2 (number of experts activated per token)
 - `aux_loss_coef`: 0.01 (MoE auxiliary loss coefficient)
+- `bert_model_name`: "bert-base-chinese" (BERT model name)
+- `freeze_bert`: True (whether to freeze BERT parameters)
+- `not_freeze_bert_num_layers`: 3 (number of BERT layers not frozen)
 
 ---
 
@@ -92,16 +98,17 @@ MoE increases model capacity through sparse activation without significantly inc
 SudenMind/
 ├── config.json             # ⭐ Centralized hyperparameter configuration
 ├── data/
-│   ├── corpus.txt          # Raw corpus (Question\tAnswer)
-│   ├── chat_data.json      # Processed training data
-│   └── vocab.json          # Vocabulary
+│   └── cache/              # Dataset cache directory
+│       └── thu_coai_lccc_base_train.json  # LCCC dataset cache
 ├── model/
 │   └── sudenmind.pth       # Trained model
-├── model.py                # AttnRes model definition
-├── datasets.py             # Dataset and data loading
-├── process.py              # Data preprocessing and vocab building
-├── train.py                # Training script (supports mixed precision)
-├── chat.py                 # Interactive chat interface
+├── src/
+│   ├── model.py            # AttnRes model definition (with BERT encoder)
+│   ├── data_utils.py       # Dataset and data loading (LCCC dataset)
+│   ├── train.py            # Training script (supports mixed precision)
+│   ├── chat.py             # Interactive chat interface
+│   ├── moe.py              # MoE module
+│   └── view_module.py      # Model visualization
 └── README_EN.md            # This file
 ```
 
@@ -121,7 +128,10 @@ All hyperparameters are managed in `config.json`. **No code modification needed*
     "dropout": 0.1,
     "num_experts": 4,      // MoE number of experts
     "top_k": 2,            // Number of experts activated per token
-    "aux_loss_coef": 0.01  // MoE auxiliary loss coefficient
+    "aux_loss_coef": 0.01,  // MoE auxiliary loss coefficient
+    "bert_model_name": "bert-base-chinese",  // BERT model name
+    "freeze_bert": true,   // Whether to freeze BERT parameters
+    "not_freeze_bert_num_layers": 3  // Number of BERT layers not frozen
   },
   "training": {
     "lr": 0.001,           // Learning rate
@@ -136,6 +146,10 @@ All hyperparameters are managed in `config.json`. **No code modification needed*
     "max_length": 100,     // Max generation length
     "temperature": 0.6,    // Sampling temperature
     "top_k": 5
+  },
+  "data": {
+    "max_seq_len": 512,    // Max sequence length
+    "max_history": 5       // Max history turns
   }
 }
 ```
@@ -158,27 +172,27 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Other dependencies
-pip install jieba onnx onnxruntime netron
+pip install jieba onnx onnxruntime netron transformers
 ```
 
-### 2. Prepare Data
+### 2. Data Preparation
 
-Place your dialogue corpus in `data/corpus.txt`, format: **Question\tAnswer** (tab-separated)
+The project uses the **LCCC (Large-scale Cleaned Chinese Conversation)** dataset, which is automatically loaded from Hugging Face and cached to the `data/cache/` directory.
 
-```
-Hello\tHello! Nice to meet you.
-How's the weather today\tIt's quite warm today, perfect for going out.
-```
-
-### 3. Data Preprocessing
+### 3. Train Model
 
 ```bash
-python process.py
+python src/train.py
 ```
 
-This generates:
-- `data/vocab.json`: Vocabulary
-- `data/chat_data.json`: Training data
+**Training Features**:
+- Automatically loads LCCC dataset from Hugging Face
+- Automatically caches dataset to `data/cache/` directory
+- Automatic GPU usage (CUDA/ROCm)
+- Mixed precision training (FP16)
+- Cosine Annealing learning rate scheduling
+- Label Smoothing
+- Early Stopping mechanism
 
 ### 4. Train Model
 
@@ -199,10 +213,15 @@ python train.py
 trainer = Trainer(model, chat_data, device=device, vocab_size=vocab_size, lr=5e-4)
 ```
 
-### 5. Chat Interface
+### 4. Chat Interface
 
 ```bash
-python chat.py
+python src/chat.py
+```
+
+**Test BERT Tokenizer**:
+```bash
+python src/chat.py --test-tokenizer
 ```
 
 ---

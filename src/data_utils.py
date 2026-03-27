@@ -95,22 +95,14 @@ class LCCCDataset(Dataset):
         # 移除中文词之间的空格（中文不需要词间空格）
         # 但保留英文单词之间的空格
         import re
-
         # 处理中文文本：移除中文字符之间的空格
         # 匹配模式：中文字符 + 空格 + 中文字符
         cleaned = re.sub(r"([\u4e00-\u9fff])\s+([\u4e00-\u9fff])", r"\1\2", cleaned)
-
         # 处理中文标点：移除标点前的空格
         cleaned = re.sub(r'\s+([，。！？；："\'《》【】（）])', r"\1", cleaned)
-
-        # 处理中文标点：移除标点后的空格（除了句号后可能需要空格）
-        cleaned = re.sub(r'([，！？；："\'《》【】（）])\s+', r"\1", cleaned)
-
-        # 移除多余的空格（多个连续空格变为一个）
-        cleaned = re.sub(r"\s+", " ", cleaned)
-
-        # 移除首尾空格
-        cleaned = cleaned.strip()
+        cleaned = re.sub(r'([，！？；："\'《》【】（）])\s+', r"\1", cleaned) # 处理中文标点：移除标点后的空格（除了句号后可能需要空格）
+        cleaned = re.sub(r"\s+", " ", cleaned) # 移除多余的空格（多个连续空格变为一个）
+        cleaned = cleaned.strip() # 移除首尾空格
 
         return cleaned
 
@@ -177,7 +169,7 @@ class LCCCDataset(Dataset):
         return {
             "input_ids": torch.tensor(input_seq, dtype=torch.long),
             "labels": torch.tensor(target_seq, dtype=torch.long),
-            "attention_mask": torch.ones(len(input_seq), dtype=torch.long),
+            "attention_mask": torch.ones(len(input_seq), dtype=torch.bool),
         }
 
     def _format_input(self, history: List[str], question: str) -> str:
@@ -187,12 +179,12 @@ class LCCCDataset(Dataset):
         formatted = "[CLS]"
         for i, utterance in enumerate(history):
             if i % 2 == 0:
-                formatted += f"用户: {utterance}"
+                formatted += f"用户:{utterance}"
             else:
-                formatted += f"助手: {utterance}"
+                formatted += f"助手:{utterance}"
             formatted += "[SEP]"
 
-        formatted += f"用户: {question}[SEP]"
+        formatted += f"用户:{question}[SEP]"
         return formatted
 
     def _create_dummy_sample(self):
@@ -205,7 +197,7 @@ class LCCCDataset(Dataset):
         return {
             "input_ids": dummy_input,
             "labels": dummy_target,
-            "attention_mask": torch.ones(len(dummy_input), dtype=torch.long),
+            "attention_mask": torch.ones(len(dummy_input), dtype=torch.bool),
         }
 
 
@@ -219,7 +211,7 @@ def collate_lccc_batch(batch):
     attention_masks_padded = pad_sequence(
         attention_masks, batch_first=True, padding_value=0
     )
-
+    # attention_mask: 1 for real tokens, 0 for padding tokens
     return {
         "input_ids": input_ids_padded,
         "labels": labels_padded,
@@ -256,7 +248,7 @@ def format_conversation_for_inference(
     cleaned_question = LCCCDataset.clean_lccc_text(current_question)
 
     if not cleaned_history:
-        return f"[CLS]用户: {cleaned_question}[SEP]"
+        return f"[CLS]用户:{cleaned_question}[SEP]"
 
     formatted = "[CLS]"
 
@@ -266,5 +258,5 @@ def format_conversation_for_inference(
     for speaker, utterance in recent_history:
         formatted += f"{speaker}: {utterance}[SEP]"
 
-    formatted += f"用户: {cleaned_question}[SEP]"
+    formatted += f"用户:{cleaned_question}[SEP]"
     return formatted

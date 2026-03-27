@@ -5,50 +5,57 @@
 
 ## 修改文件列表
 
-### 1. process.py (数据预处理)
+### 1. data_utils.py (数据预处理和加载)
 - **移除**: jieba分词器
 - **添加**: BertTokenizer (bert-base-chinese)
-- **重构**: Vocab类使用BERT固定词表(21128个token)
-- **特殊token映射**:
-  - BERT [PAD] (0) → <PAD> (0)
-  - BERT [UNK] (100) → <UNK> (1)
-  - BERT [CLS] (101) → <SOS> (2)
-  - BERT [SEP] (102) → <SEP> (4)
-  - 额外添加: <EOS> (3)
+- **添加**: LCCCDataset类，自动从Hugging Face加载LCCC数据集
+- **添加**: 数据缓存机制，缓存到data/cache/目录
+- **特殊token使用**: 直接使用BERT的特殊token
+  - [CLS] (101) 作为序列开始
+  - [SEP] (102) 作为序列结束和分隔符
+  - [PAD] (0) 作为填充
+  - [UNK] (100) 作为未知token
 
-### 2. datasets.py (数据加载)
-- **更新**: sentence_to_ids() 使用BERT编码
-- **更新**: ids_to_words() 使用BERT解码
-- **保持**: ChatDataset类和collate函数不变
+### 2. data_utils.py (数据加载)
+- **添加**: LCCCDataset类，支持多轮对话处理
+- **添加**: sentence_to_ids() 使用BERT编码
+- **添加**: ids_to_sentence() 使用BERT解码
+- **添加**: collate_lccc_batch() 函数用于批量处理
 
 ### 3. model.py (模型架构)
 - **添加**: BertModel作为编码器
 - **添加**: 维度适配层 (BERT 768维 → 模型256维)
 - **移除**: 原有的Embedding层和可学习位置编码
-- **冻结**: BERT所有参数 (requires_grad=False)
+- **冻结**: BERT部分参数 (requires_grad=False)，保留最后几层可训练
 - **修改**: 权重初始化只初始化非BERT参数
 
 ### 4. train.py (训练脚本)
 - **更新**: 使用BERT词表大小(21128)
-- **添加**: BERT相关参数 (bert_model_name, freeze_bert)
+- **添加**: BERT相关参数 (bert_model_name, freeze_bert, not_freeze_bert_num_layers)
 - **更新**: 模型初始化参数
+- **更新**: 使用LCCCDataset加载数据
 
 ### 5. chat.py (推理脚本)
 - **更新**: 使用BERT分词器
 - **添加**: BERT参数配置
 - **添加**: 分词器测试函数
+- **更新**: 使用format_conversation_for_inference处理对话历史
 
 ### 6. config.json (配置文件)
 - **添加**: 
   - `bert_model_name`: "bert-base-chinese"
   - `freeze_bert`: true
+  - `not_freeze_bert_num_layers`: 3
   - `bert_hidden_dim`: 768
+- **添加**: data配置部分
+  - `max_seq_len`: 512
+  - `max_history`: 5
 
 ## 技术架构
 
 ### 数据流
 ```
-原始文本 → BertTokenizer → BERT ID → 当前系统ID → 训练数据
+原始文本 → BertTokenizer → BERT ID → 训练数据
 ```
 
 ### 模型架构
@@ -67,29 +74,23 @@
 ### 1. 环境要求
 ```bash
 conda activate pytorch291
-# 确保已安装: torch, transformers, jieba, onnx, onnxruntime, netron
+# 确保已安装: torch, transformers, datasets, onnx, onnxruntime, netron
 ```
 
-### 2. 数据处理
+### 2. 训练模型
 ```bash
-# 准备数据: 将对话对放入 data/corpus.txt (格式: 问题\t回答)
-# 运行预处理
-python process.py
+# 开始训练 (BERT参数部分冻结)
+python src/train.py
+# 数据将自动从Hugging Face加载并缓存
 ```
 
-### 3. 训练模型
-```bash
-# 开始训练 (BERT参数已冻结)
-python train.py
-```
-
-### 4. 对话测试
+### 3. 对话测试
 ```bash
 # 交互式对话
-python chat.py
+python src/chat.py
 
 # 测试BERT分词器
-python chat.py --test-tokenizer
+python src/chat.py --test-tokenizer
 ```
 
 ### 5. 测试脚本
@@ -164,25 +165,27 @@ python quick_test.py
 
 ## 文件清单
 ```
-SudenMind_bert/
-├── BERT_INTEGRATION_SUMMARY.md  # 本文件
+SudenMind/
+├── docs/BERT_INTEGRATION_SUMMARY.md  # 本文件
 ├── README.md                    # 项目说明
 ├── config.json                  # 配置文件 (已更新)
-├── process.py                   # 数据处理 (BERT集成)
-├── datasets.py                  # 数据加载 (BERT集成)
-├── model.py                     # 模型架构 (BERT集成)
-├── train.py                     # 训练脚本 (BERT集成)
-├── chat.py                      # 对话脚本 (BERT集成)
-├── test_bert_integration.py     # BERT集成测试
-├── test_integration.py          # 完整集成测试
-├── quick_test.py                # 快速测试
+├── src/model.py                 # 模型架构 (BERT集成)
+├── src/data_utils.py            # 数据处理和加载 (BERT集成)
+├── src/train.py                 # 训练脚本 (BERT集成)
+├── src/chat.py                  # 对话脚本 (BERT集成)
+├── src/moe.py                   # MoE模块
+├── src/view_module.py           # 模型可视化
+├── tests/test_bert_integration.py     # BERT集成测试
+├── tests/test_integration.py          # 完整集成测试
+├── tests/quick_test.py                # 快速测试
 └── data/                        # 数据目录
+    └── cache/                   # 数据集缓存
 ```
 
 ## 联系方式
 如有问题，请参考原始项目文档或联系开发者。
 
 ---
-**完成时间**: 2025年3月23日
-**版本**: 3.0 (BERT集成版)
+**完成时间**: 2026年3月27日
+**版本**: 4.0 (Encoder-Decoder 版)
 **状态**: ✅ 集成完成，测试通过

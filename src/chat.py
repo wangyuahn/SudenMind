@@ -4,8 +4,6 @@ import os
 from model import SudenMind
 from data_utils import (
     format_conversation_for_inference,
-    sentence_to_ids,
-    ids_to_sentence,
 )
 from transformers import BertTokenizer
 
@@ -23,26 +21,19 @@ def chat():
     tokenizer = BertTokenizer.from_pretrained("bert-base-chinese")
     vocab_size = tokenizer.vocab_size
 
-    embedding_dim = model_cfg["d_model"]
-    hidden_dim = model_cfg["d_fnn"]
-    output_dim = vocab_size
-
     bert_model_name = model_cfg.get("bert_model_name", "bert-base-chinese")
     freeze_bert = model_cfg.get("freeze_bert", True)
-    num_experts = model_cfg.get("num_experts", 4)
-    top_k = model_cfg.get("top_k", 2)
-    aux_loss_coef = model_cfg.get("aux_loss_coef", 0.01)
 
     model = SudenMind(
-        vocab_size,
-        embedding_dim,
-        hidden_dim,
-        output_dim,
+        embedding_dim=model_cfg["d_model"],
+        hidden_dim=model_cfg["d_fnn"],
+        output_dim=vocab_size,
         bert_model_name=bert_model_name,
         freeze_bert=freeze_bert,
-        num_experts=num_experts,
-        top_k=top_k,
-        aux_loss_coef=aux_loss_coef,
+        not_freeze_bert_num_layers=model_cfg.get("not_freeze_bert_num_layers", 4),
+        num_experts=model_cfg.get("num_experts", 4),
+        top_k=model_cfg.get("top_k", 2),
+        aux_loss_coef=model_cfg.get("aux_loss_coef", 0.01),
     ).to(device)
 
     model_path = "model/sudenmind.pth"

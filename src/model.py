@@ -44,9 +44,12 @@ class AttnRes(nn.Module):
         x: torch.Tensor,
         prev_output: List[torch.Tensor],
         attn_mask: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         norm = self.norm(x)
-        attn_out, _ = self.attn(norm, norm, norm, attn_mask=attn_mask)
+        attn_out, _ = self.attn(
+            norm, norm, norm, attn_mask=attn_mask, key_padding_mask=key_padding_mask
+        )
         x = x + nn.functional.dropout(attn_out, self.dropout, training=self.training)
 
         moe_input = self.fnn_norm(x)
@@ -106,24 +109,37 @@ class AttnResDecoder(nn.Module):
             )
 
     def forward(
-        self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if self.batch_fire:
-            return self._forward_batch_fire(x, attn_mask)
+            return self._forward_batch_fire(
+                x, attn_mask, key_padding_mask=key_padding_mask
+            )
         else:
-            return self._forward_seq(x, attn_mask)
+            return self._forward_seq(x, attn_mask, key_padding_mask=key_padding_mask)
 
     def _forward_seq(
-        self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         all_outputs: List[torch.Tensor] = []
         for layer in self.attnres:
-            x = layer(x, all_outputs, attn_mask=attn_mask)
+            x = layer(
+                x, all_outputs, attn_mask=attn_mask, key_padding_mask=key_padding_mask
+            )
             all_outputs.append(x)
         return x
 
     def _forward_batch_fire(
-        self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         B, L, D = x.size()
         N = self.n_layers
@@ -136,7 +152,13 @@ class AttnResDecoder(nn.Module):
             layer = cast(AttnRes, module)
 
             normed = layer.norm(current_x)
-            attn_out, _ = layer.attn(normed, normed, normed, attn_mask=attn_mask)
+            attn_out, _ = layer.attn(
+                normed,
+                normed,
+                normed,
+                attn_mask=attn_mask,
+                key_padding_mask=key_padding_mask,
+            )
             current_x = current_x + nn.functional.dropout(
                 attn_out, layer.dropout, training=self.training
             )
@@ -207,12 +229,12 @@ class LearnablePosition(nn.Module):
 class SudenMind(nn.Module):
     def __init__(
         self,
-        vocab_size,
         embedding_dim,
         hidden_dim,
         output_dim,
         bert_model_name="bert-base-chinese",
         freeze_bert=True,
+        not_freeze_bert_num_layers=3,
         num_experts=4,
         top_k=2,
         aux_loss_coef=0.01,
@@ -229,6 +251,13 @@ class SudenMind(nn.Module):
             for param in self.bert.parameters():
                 param.requires_grad = False
             print(f"BERT参数已冻结 ({bert_model_name})")
+
+            num_layers = len(self.bert.encoder.layer)
+            start_layer = num_layers - not_freeze_bert_num_layers
+            for i in range(start_layer, num_layers):
+                for param in self.bert.encoder.layer[i].parameters():
+                    param.requires_grad = True
+                print(f"BERT参数已解冻第 {i} 层")
 
         self.bert_adapter = nn.Linear(self.bert_hidden_dim, embedding_dim)
 
@@ -257,27 +286,33 @@ class SudenMind(nn.Module):
             if p.dim() > 1 and p.requires_grad:
                 if not name.startswith("bert."):
                     nn.init.xavier_uniform_(p)
-                    print(f"初始化: {name} ({p.shape})")
+                    # print(f"初始化: {name} ({p.shape})")
 
-    def forward(self, x):
+    def forward(self, x, key_padding_mask=None):
         device = x.device
         batch_size, seq_len = x.size()
 
         bert_input_ids = x
 
-        if self.freeze_bert:
-            with torch.no_grad():
-                bert_outputs = self.bert(bert_input_ids)
-                bert_embeddings = bert_outputs.last_hidden_state
-        else:
-            bert_outputs = self.bert(bert_input_ids)
-            bert_embeddings = bert_outputs.last_hidden_state
+        bert_outputs = self.bert(
+            bert_input_ids,
+            attention_mask=key_padding_mask.float()
+            if key_padding_mask is not None
+            else None,
+        )
+        bert_embeddings = bert_outputs.last_hidden_state
 
         embedded = self.bert_adapter(bert_embeddings)
 
         causal_mask = self.generate_square_subsequent_mask(seq_len).to(device)
 
-        out = self.decoder(embedded, attn_mask=causal_mask)
+        out = self.decoder(
+            embedded,
+            attn_mask=causal_mask,
+            key_padding_mask=(key_padding_mask == False)
+            if key_padding_mask is not None
+            else None,
+        )
 
         return self.fc(out)
 
@@ -285,12 +320,6 @@ class SudenMind(nn.Module):
         if hasattr(self.decoder, "get_aux_loss"):
             return self.decoder.get_aux_loss()
         return 0.0
-
-    def convert_to_bert_ids(self, current_ids):
-        return current_ids
-
-    def convert_from_bert_ids(self, bert_ids):
-        return bert_ids
 
     def generate_square_subsequent_mask(self, sz):
         mask = torch.triu(torch.ones(sz, sz), diagonal=1).bool()
@@ -303,6 +332,9 @@ class SudenMind(nn.Module):
         input_seq = input_seq.to(device)
         generated = input_seq
 
+        # 获取 [SEP] token ID (BERT 的 sep_token_id 是 102)
+        sep_token_id = 102  # BERT 中文模型的 [SEP] token ID
+
         with torch.no_grad():
             for _ in range(max_length):
                 output = self.forward(generated)
@@ -312,7 +344,8 @@ class SudenMind(nn.Module):
                 next_token = torch.multinomial(probs, num_samples=1)
                 next_token = torch.gather(top_indices, dim=-1, index=next_token)
 
-                if next_token.item() == 3:
+                # 使用正确的 [SEP] token ID 作为停止条件
+                if next_token.item() == sep_token_id:
                     break
 
                 generated = torch.cat([generated, next_token], dim=1)
