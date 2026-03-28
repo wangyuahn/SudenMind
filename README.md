@@ -12,7 +12,7 @@
   </a>
 </p>
 
-SudenMind 是一个基于 **AttnRes (Attention with Residual)** 架构的中文对话生成模型。采用 Encoder-Decoder 设计，使用自定义 6 层 AttnRes 编码器 + 6 层 AttnRes 解码器，支持跨层残差连接，使用 **ShareGPT/ChatML** 业界标准对话格式，适配 ChatGLM tokenizer，针对中文对话场景优化。
+SudenMind 是一个基于 **AttnRes (Attention with Residual)** 架构的中文对话生成模型。采用 Encoder-Decoder 设计，使用自定义 2 层 AttnRes 编码器 + 6 层 AttnRes 解码器，支持跨层残差连接，使用 **ShareGPT/ChatML** 业界标准对话格式，适配 ChatGLM tokenizer，针对中文对话场景优化。
 
 ---
 
@@ -37,7 +37,7 @@ SudenMind 是一个基于 **AttnRes (Attention with Residual)** 架构的中文�
     ↓
 Token Embedding + Position Encoding
     ↓
-AttnRes Encoder × 6 ← 自定义编码器（双向注意力）
+AttnRes Encoder × 2 ← 自定义编码器（双向注意力）
   ├─ 第0层: 双向自注意力 → MoE → output_0
   ├─ 第1层: 双向自注意力 → MoE → AttnRes([output_0]) → output_1
   └─ ...每层都可访问之前所有层的输出
@@ -244,5 +244,5 @@ Assistant: 今天天气很好，阳光明媚！
 - **兼容 OpenAI/Qwen/ChatGLM2/3** 等主流模型格式
 
 ### v5.0
-- 移除 BERT 编码器，改为自定义 6 层 AttnResEncoder
+- 移除 BERT 编码器，改为自定义 2 层 AttnResEncoder
 - 适配 ChatGLM tokenizer（词表大小 65024）

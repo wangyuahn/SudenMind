@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg">
 </p>
 
-SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** architecture. It features a custom Encoder-Decoder design with AttnResEncoder (6 layers) and AttnResDecoder (6 layers), cross-layer residual connections, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks.
+SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** architecture. It features a custom Encoder-Decoder design with AttnResEncoder (2 layers) and AttnResDecoder (6 layers), cross-layer residual connections, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks.
 
 ---
 
@@ -31,10 +31,9 @@ Input (batch, seq_len)
     ↓
 Token Embedding + Position Encoding
     ↓
-AttnRes Encoder × 6 (Bidirectional Attention)
+AttnRes Encoder × 2 (Bidirectional Attention)
   ├─ Layer 0: Bidirectional Self-Attn → MoE → output_0
   ├─ Layer 1: Bidirectional Self-Attn → MoE → AttnRes([output_0]) → output_1
-  ├─ Layer 2: Bidirectional Self-Attn → MoE → AttnRes([output_0, output_1]) → output_2
   └─ ...Each layer can access all previous layer outputs
     ↓
 AttnRes Decoder × 6 (Causal Attention)
@@ -115,7 +114,7 @@ All hyperparameters are managed centrally in `config.json`, no code modification
     "d_model": 512,        // Embedding dimension
     "d_fnn": 1024,         // Feed-forward network dimension
     "nhead": 8,            // Attention heads
-    "n_layers": 6,         // Encoder/Decoder layers
+    "n_layers": 6,         // Encoder/Decoder layers. Encoder layer count = layer//3
     "dropout": 0.1,
     "num_experts": 8,      // MoE expert count
     "top_k": 2,            // Experts activated per token
@@ -254,7 +253,7 @@ MIT License
 ## 🔄 Changelog
 
 ### v5.0 (Current)
-- **Removed BERT encoder**, replaced with custom 6-layer AttnResEncoder
+- **Removed BERT encoder**, replaced with custom 2-layer AttnResEncoder
 - **Encoder layers can access all previous layer outputs** (AttnRes mechanism)
 - **ChatGLM tokenizer integration** (vocab size 65024)
 - **Data format changed to ChatGLM format**: `[gMASK] [sop] input [eos]`
