@@ -147,18 +147,29 @@ class ConversationDataset(Dataset):
         if len(dialog) % 2 != 0:
             dialog = dialog[:-1]
 
-        # 构建序列: [gMASK] [BOS] <对话> [EOS]
-        token_ids = (
+        # 构建完整序列: [gMASK] [BOS] <对话> [EOS]
+        full_tokens = (
             [self.gmask_id, self.bos_id]
             + self._build_dialog_tokens(dialog)
             + [self.eos_id]
         )
-        token_ids = token_ids[: self.max_length]
+        full_tokens = full_tokens[: self.max_length]
 
+        # 找到助手回答的开始位置
+        assistant_start_pos = self._find_assistant_start_position(full_tokens, dialog)
+        
+        # 创建labels: 助手回答之前的部分设为-100（不计算损失）
+        labels = [-100] * len(full_tokens)
+        if assistant_start_pos < len(full_tokens):
+            # 助手回答部分正常计算损失
+            labels[assistant_start_pos:] = full_tokens[assistant_start_pos:]
+
+        # 自回归训练：input_ids是完整序列（去掉最后一个token）
+        # labels是向右偏移一个位置的序列
         return {
-            "input_ids": torch.tensor(token_ids[:-1], dtype=torch.long),
-            "labels": torch.tensor(token_ids[1:], dtype=torch.long),
-            "attention_mask": torch.ones(len(token_ids) - 1, dtype=torch.bool),
+            "input_ids": torch.tensor(full_tokens[:-1], dtype=torch.long),
+            "labels": torch.tensor(labels[1:], dtype=torch.long),
+            "attention_mask": torch.ones(len(full_tokens) - 1, dtype=torch.bool),
         }
 
     def _build_dialog_tokens(self, dialog: List[str]) -> List[int]:
@@ -184,6 +195,27 @@ class ConversationDataset(Dataset):
                 tokens.append(self.newline_id)
 
         return tokens
+    
+    def _find_assistant_start_position(self, full_tokens: List[int], dialog: List[str]) -> int:
+        """找到助手回答在token序列中的开始位置。"""
+        # 找到最后一个助手回复的开始
+        for i in range(len(dialog)-1, -1, -1):
+            if i % 2 == 1:  # 助手轮次
+                # 构建助手开头的token序列
+                role = ROLE_ASSISTANT
+                assistant_start = []
+                assistant_start.extend([self.im_start_id] if self.im_start_id else self._encode_text(IM_START))
+                assistant_start.extend(self._encode_text(role))
+                assistant_start.append(self.newline_id)
+                
+                # 在full_tokens中查找这个模式
+                pattern = assistant_start
+                for pos in range(len(full_tokens) - len(pattern) + 1):
+                    if full_tokens[pos:pos+len(pattern)] == pattern:
+                        return pos + len(pattern)  # 返回助手内容开始的位置
+        
+        # 如果找不到，默认从中间位置开始
+        return len(full_tokens) // 2
 
     def _dummy_sample(self) -> Dict[str, torch.Tensor]:
         """为无效数据创建空样本。"""
