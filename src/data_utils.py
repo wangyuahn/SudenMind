@@ -342,9 +342,11 @@ def extract_response(text: str) -> str:
     if not text:
         return ""
 
-    assistant_start = f"{IM_START}{ROLE_ASSISTANT}"
+    # 正确的助手开始模式：<|im_start|>assistant\n
+    assistant_start = f"{IM_START}{ROLE_ASSISTANT}\n"
 
     if assistant_start not in text:
+        # 如果没有找到助手标记，返回整个文本（可能是模型直接生成的回答）
         return text.strip()
 
     idx = text.find(assistant_start) + len(assistant_start)

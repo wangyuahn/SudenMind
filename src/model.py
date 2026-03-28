@@ -457,7 +457,7 @@ class SudenMind(nn.Module):
         input_seq = input_seq.to(device)
         generated = input_seq
         attention_mask = torch.ones_like(generated, dtype=torch.bool)
-        eos_token_id = 64790
+        eos_token_id = 2
 
         with torch.no_grad():
             for _ in range(max_length):

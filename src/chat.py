@@ -17,7 +17,7 @@ from transformers import AutoTokenizer
 DEBUG = True
 GMASK_ID = 64790
 BOS_ID = 64792
-USE_EOS_STOP = False
+USE_EOS_STOP = True
 
 
 def chat():
