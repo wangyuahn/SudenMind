@@ -95,12 +95,12 @@ SudenMind 使用业界标准的 **ShareGPT/ChatML** 格式：
 
 ### 与业界对比
 
-| 模型 | 格式 |
-|------|------|
-| **SudenMind** | `<|im_start|>user\n{内容}<|im_end|>` |
-| OpenAI GPT-4 | `<|im_start|>user<|im_sep|>{内容}<|im_end|>` |
-| Qwen | `<|im_start|>user\n{内容}<|im_end|>` |
-| ChatGLM2/3 | `[gMASK] [BOS] <|user|>\n{内容}<|assistant|>` |
+| 模型 | 格式 | 特点 |
+|------|------|------|
+| **SudenMind** | \<\|im_start\|\>user\n{内容}\</\|im_end\|\> | 使用 ShareGPT/ChatML 标准格式 |
+| OpenAI GPT-4 | \<\|im_start\|\>user\<\|im_sep\|\>{内容}\</\|im_end\|\> | 使用 \<\|im_sep\|\> 分隔符 |
+| Qwen | \<\|im_start\|\>user\n{内容}\</\|im_end\|\> | 与 SudenMind 格式兼容 |
+| ChatGLM2/3 | `[gMASK] [BOS]` \<\|user\|\>\n{内容}\</\|assistant\|\> | 使用特殊标记和角色标签 |
 
 ---
 
