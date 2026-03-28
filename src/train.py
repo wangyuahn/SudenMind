@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import math
+import argparse
 
 os.environ["TORCH_ONNX_ENABLE_DYNAMO_EXPORT"] = "0"
 warnings.filterwarnings("ignore")
@@ -39,13 +40,15 @@ from torch.amp.grad_scaler import GradScaler
 sys.stderr = _orig_stderr
 
 import json
-from data_utils import LCCCDataset, collate_lccc_batch
+from transformers import AutoTokenizer
+from data_utils import ConversationDataset, collate_conversation_batch, IM_START, IM_END
 from model import SudenMind
 
 cfg = json.load(open("config.json", "r", encoding="utf-8"))
 train_cfg = cfg["training"]
 model_cfg = cfg["model"]
 gen_cfg = cfg["generation"]
+data_cfg = cfg["data"]
 
 
 def export_to_onnx(
@@ -55,24 +58,24 @@ def export_to_onnx(
     seq_len=gen_cfg["onnx_seq_len"],
     save_path="model/sudenmind.onnx",
 ):
+    """导出模型为ONNX格式"""
     model.eval()
 
     dummy_input = torch.randint(0, vocab_size, (1, seq_len), dtype=torch.long).to(
         device
     )
+    dummy_mask = torch.ones(1, seq_len, dtype=torch.bool).to(device)
 
-    input_names = ["input_ids"]
+    input_names = ["input_ids", "attention_mask"]
     output_names = ["logits"]
 
     dynamic_axes = {
         "input_ids": {0: "batch_size", 1: "sequence_len"},
+        "attention_mask": {0: "batch_size", 1: "sequence_len"},
         "logits": {0: "batch_size", 1: "sequence_len", 2: "vocab_size"},
     }
 
     print(f"正在导出 ONNX 模型到 {save_path}...")
-    print("提示: 导出完成后可用 Netron 打开查看模型结构")
-    print("  安装: pip install netron")
-    print("  使用: netron model/sudenmind.onnx")
 
     try:
         with warnings.catch_warnings():
@@ -83,7 +86,7 @@ def export_to_onnx(
             with torch.no_grad():
                 torch.onnx.export(
                     model,
-                    (dummy_input,),
+                    (dummy_input, dummy_mask),
                     save_path,
                     input_names=input_names,
                     output_names=output_names,
@@ -165,13 +168,12 @@ class Trainer:
             epoch_loss = 0
             epoch_aux_loss = 0
             num_batches = 0
-
+            
             for batch_idx, batch in enumerate(self.train_loader):
                 inputs = batch["input_ids"].to(self.device)
                 targets = batch["labels"].to(self.device)
                 attention_masks = batch["attention_mask"].to(self.device)
-                # attention_masks = None
-
+                
                 self.optimizer.zero_grad()
 
                 if self.use_amp and self.scaler is not None:
@@ -181,7 +183,6 @@ class Trainer:
                         main_loss = self.criterion(
                             output.view(-1, output.size(-1)), targets.view(-1)
                         )
-                        # nan 检查
                         if torch.isnan(main_loss):
                             print("main_loss is nan")
                             continue
@@ -200,7 +201,6 @@ class Trainer:
                     main_loss = self.criterion(
                         output.view(-1, output.size(-1)), targets.view(-1)
                     )
-                    # nan 检查
                     if torch.isnan(main_loss):
                         print("main_loss is nan")
                         continue
@@ -222,7 +222,7 @@ class Trainer:
                 epoch_aux_loss += aux_loss_value
                 num_batches += 1
 
-                if (batch_idx + 1) % 50 == 0:
+                if (batch_idx + 1) % 500 == 0:
                     current_lr = self.optimizer.param_groups[0]["lr"]
                     print(
                         f"  Step {self.global_step} | "
@@ -253,7 +253,6 @@ class Trainer:
                 f"LR: {current_lr:.2E} | "
                 f"Best Loss: {best_loss:.4f}"
             )
-            # 平均损失大于最佳损失，早停代码
             if avg_loss > best_loss:
                 counter += 1
                 if counter >= patience:
@@ -272,48 +271,115 @@ class Trainer:
             print(f"  → Best model saved - Loss: {loss:.4f}")
 
 
+def get_device(device_arg="auto"):
+    """获取训练设备。
+    
+    Args:
+        device_arg: "auto" 自动检测，"cpu" 强制使用 CPU，"cuda" 强制使用 GPU
+    
+    Returns:
+        torch.device 对象
+    """
+    if device_arg == "cpu":
+        print("强制使用 CPU 进行训练/测试")
+        return torch.device("cpu")
+    elif device_arg == "cuda":
+        if torch.cuda.is_available():
+            print("强制使用 CUDA 进行训练")
+            return torch.device("cuda")
+        else:
+            print("警告: CUDA 不可用，回退到 CPU")
+            return torch.device("cpu")
+    else:  # auto
+        if torch.cuda.is_available():
+            print("自动检测: 使用 CUDA 进行训练")
+            return torch.device("cuda")
+        else:
+            print("自动检测: 使用 CPU 进行训练")
+            return torch.device("cpu")
+
+
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    parser = argparse.ArgumentParser(description="SudenMind 训练脚本")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="训练设备: auto(自动检测), cpu(强制CPU), cuda(强制GPU)。默认: auto"
+    )
+    args = parser.parse_args()
+    
+    device = get_device(args.device)
+    print(f"使用设备: {device}")
 
-    vocab_size = 21128
-    print(f"BERT词表大小: {vocab_size}")
+    # 加载ChatGLM tokenizer
+    tokenizer_name = model_cfg.get("tokenizer_name", "THUDM/chatglm-6b")
+    print(f"正在加载ChatGLM tokenizer: {tokenizer_name}")
 
-    bert_model_name = model_cfg.get("bert_model_name", "bert-base-chinese")
-    freeze_bert = model_cfg.get("freeze_bert", True)
+    # 加载tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_name,
+        trust_remote_code=True,
+    )
+    
+    # 添加ShareGPT特殊token（与data_utils保持一致）
+    tokenizer.add_special_tokens({"additional_special_tokens": [IM_START, IM_END]})
+    
+    # 从tokenizer获取真实词表大小
+    vocab_size = len(tokenizer)
+    print(f"使用词表大小: {vocab_size} (原始: {vocab_size - 2}, 特殊token: 2)")
 
+    # 初始化SudenMind模型
     model = SudenMind(
-        embedding_dim=model_cfg["d_model"],
-        hidden_dim=model_cfg["d_fnn"],
-        output_dim=vocab_size,
-        bert_model_name=bert_model_name,
-        freeze_bert=freeze_bert,
-        not_freeze_bert_num_layers=model_cfg.get("not_freeze_bert_num_layers", 4),
-        num_experts=model_cfg.get("num_experts", 4),
+        vocab_size=vocab_size,
+        d_model=model_cfg["d_model"],
+        d_fnn=model_cfg["d_fnn"],
+        nhead=model_cfg.get("nhead", 8),
+        dropout=model_cfg.get("dropout", 0.1),
+        n_layers=model_cfg.get("n_layers", 6),
+        num_experts=model_cfg.get("num_experts", 8),
         top_k=model_cfg.get("top_k", 2),
         aux_loss_coef=model_cfg.get("aux_loss_coef", 0.01),
+        max_position_embeddings=model_cfg.get("max_position_embeddings", 5000),
     ).to(device)
 
+    # 尝试加载预训练权重
     try:
-        model.load_state_dict(torch.load("model/sudenmind.pth", map_location=device))
-        print("成功加载预训练模型，继续训练...")
-    except:
-        print("未找到预训练模型，开始全新训练")
+        state_dict = torch.load("model/sudenmind.pth", map_location=device)
 
-    data_cfg = cfg["data"]
-    dataset = LCCCDataset(
+        # 检查词表大小是否匹配（处理添加特殊token后的情况）
+        embedding_weight = state_dict.get("token_embedding.weight")
+        if embedding_weight is not None and embedding_weight.shape[0] != vocab_size:
+            print(
+                f"词表大小不匹配: 权重={embedding_weight.shape[0]}, 模型={vocab_size}"
+            )
+            print("重新初始化 token embedding 层...")
+            # 删除不匹配的权重，让模型重新初始化
+            del state_dict["token_embedding.weight"]
+            del state_dict["fc.3.weight"]
+            del state_dict["fc.3.bias"]
+
+        model.load_state_dict(state_dict, strict=False)
+        print("成功加载预训练模型，继续训练...")
+    except Exception as e:
+        print(f"未找到预训练模型或加载失败: {e}")
+        print("开始全新训练")
+
+    # 加载数据集（ShareGPT格式）
+    dataset = ConversationDataset(
         split=data_cfg.get("split", "train"),
         config=data_cfg.get("config", "base"),
         max_history=data_cfg.get("max_history", 5),
         max_length=data_cfg.get("max_seq_len", 512),
-        tokenizer_name=bert_model_name,
+        tokenizer_name=tokenizer_name,
     )
 
     chat_data = DataLoader(
         dataset,
         batch_size=train_cfg["batch_size"],
         shuffle=True,
-        collate_fn=collate_lccc_batch,
+        collate_fn=collate_conversation_batch,
         pin_memory=True if torch.cuda.is_available() else False,
         num_workers=4,
     )
@@ -324,5 +390,5 @@ if __name__ == "__main__":
     trainer.train_epoch(
         epoch_num=train_cfg["max_epochs"],
         patience=train_cfg["patience"],
-        target_loss=train_cfg["target_loss"]
+        target_loss=train_cfg["target_loss"],
     )

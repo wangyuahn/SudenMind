@@ -1,9 +1,10 @@
-# SudenMind-BERT 依赖包
+# SudenMind-ChatGLM 依赖包
 
 # 核心依赖
 torch>=2.0.0
 transformers>=4.30.0
 datasets>=2.0.0
+sentencepiece>=0.1.99  # ChatGLM tokenizer依赖
 
 # 模型导出和可视化
 onnx>=1.14.0

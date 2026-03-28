@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-SudenMind-BERT 安装脚本
+SudenMind 安装脚本
+基于 ChatGLM tokenizer + 自定义 AttnResEncoder 的中文对话生成模型
 """
 
 from setuptools import setup, find_packages
@@ -14,11 +15,11 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     ]
 
 setup(
-    name="sudenmind-bert",
+    name="sudenmind",
     version="3.0.0",
     author="SudenMind Team",
     author_email="",
-    description="Chinese dialogue generation model with BERT encoder and AttnRes+MoE architecture",
+    description="Chinese dialogue generation model with custom AttnResEncoder/Decoder and ChatGLM tokenizer",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="",

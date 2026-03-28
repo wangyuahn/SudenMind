@@ -1,5 +1,5 @@
 #!/bin/bash
-# SudenMind-BERT 启动脚本
+# SudenMind 启动脚本
 
 set -e
 
@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 # 函数定义
 print_header() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  SudenMind-BERT 启动脚本${NC}"
+    echo -e "${BLUE}  SudenMind 启动脚本 (ChatGLM + AttnRes)${NC}"
     echo -e "${BLUE}========================================${NC}"
 }
 
@@ -48,7 +48,7 @@ check_environment() {
     # 检查必要包
     print_info "检查必要包..."
     
-    required_packages=("torch" "transformers" "jieba")
+    required_packages=("torch" "transformers" "sentencepiece")
     missing_packages=()
     
     for package in "${required_packages[@]}"; do
