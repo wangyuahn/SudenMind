@@ -3,7 +3,7 @@
 # 核心依赖
 torch>=2.0.0
 transformers>=4.30.0
-datasets>=2.0.0
+datasets==1.18.4
 sentencepiece>=0.1.99  # ChatGLM tokenizer依赖
 
 # 模型导出和可视化

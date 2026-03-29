@@ -4,26 +4,73 @@
   <img src="https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg">
   <img src="https://img.shields.io/badge/License-MIT-green.svg">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg">
+  <img src="https://img.shields.io/badge/Website-ai.sufun.space-blue.svg">
 </p>
 
 <p align="center">
   <a href="../README.md">
-    <img src="https://img.shields.io/badge/📖-Chinese Version-2ea44f?style=for-the-badge">
+    <img src="https://img.shields.io/badge/📖-Chinese%20Version-2ea44f?style=for-the-badge">
   </a>
 </p>
 
-SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** architecture. It features an Encoder-Decoder design with custom 2-layer AttnRes encoder + 6-layer AttnRes decoder, cross-layer residual connections, **ShareGPT/ChatML** industry-standard dialogue format, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks.
+SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** architecture. It features an Encoder-Decoder design with custom 2-layer AttnRes encoder + 6-layer AttnRes decoder, cross-layer residual connections, **ShareGPT/ChatML** industry-standard dialogue format, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks. Enhanced with gating mechanism (Gate) and KV cache inference acceleration.
 
 ---
 
 ## ✨ Key Features
 
 - **AttnRes Architecture**: Each layer can dynamically attend to outputs from all previous layers, enabling richer information flow
-- **Custom Encoder-Decoder**: 6-layer AttnResEncoder + 6-layer AttnResDecoder, each layer accessing all previous layer outputs
+- **Custom Encoder-Decoder**: 2-layer AttnResEncoder + 6-layer AttnResDecoder, each layer accessing all previous layer outputs
+- **Gating Mechanism (Gate)**: Innovative gating network dynamically balances MoE output with cross-layer residual output, adapting feature fusion ratios based on input characteristics
+- **KV Cache Inference**: Supports key-value caching for significantly accelerated autoregressive generation
 - **MoE (Mixture of Experts) Integration**: All FFN layers replaced with MoE layers, 8 experts, top_k=2
 - **ShareGPT/ChatML Format**: Uses industry-standard dialogue format, compatible with OpenAI/Qwen/ChatGLM2/3
 - **ChatGLM Tokenizer**: Compatible with ChatGLM-6B tokenizer (vocab size 65024)
 - **Mixed Precision Training**: FP16 acceleration, memory saving, AMD ROCm support
+
+## 📝 ShareGPT/ChatML Dialogue Format
+
+SudenMind uses ChatML format managed by `src/data_utils.py` with these rules:
+
+- Start with `[BOS]`, end with `[EOS]`.
+- Each turn is wrapped as `<|im_start|>{role}\n...<|im_end|>`.
+- Only assistant text in `<|im_start|>assistant ... <|im_end|>` participates in loss; all role headers, `<|im_end|>`, newline separators are masked as `-100`.
+
+### Training example
+
+```text
+[BOS] <|im_start|>user
+Hello
+<|im_end|>
+<|im_start|>assistant
+Hi there!
+<|im_end|>
+<|im_start|>user
+How are you?
+<|im_end|>
+<|im_start|>assistant
+I'm fine, thank you.
+<|im_end|>
+[EOS]
+```
+
+### Inference example
+
+```text
+[BOS] <|im_start|>user
+Hello
+<|im_end|>
+<|im_start|>assistant
+Hi there!
+<|im_end|>
+<|im_start|>user
+How are you?
+<|im_end|>
+<|im_start|>assistant
+```
+
+Model continues generating assistant content until `<|im_end|>` or `[EOS]`.
+
 - **ONNX Export**: Supports exporting to ONNX format, viewable with Netron
 
 ---
@@ -45,6 +92,7 @@ AttnRes Encoder × 2 ← Custom encoder (bidirectional attention)
 AttnRes Decoder × 6 ← Decoder (causal attention)
   ├─ Self-Attention (with causal mask)
   ├─ Cross-layer Residual Attention (AttnRes)
+  ├─ Gated Feature Fusion (Gate)
   └─ MoE Feed-Forward Network (8 experts, top_k=2)
     ↓
 Linear → Softmax
@@ -52,30 +100,30 @@ Linear → Softmax
 Output (batch, seq_len, vocab_size=65024)
 ```
 
-**AttnRes Core Idea**:
-Unlike standard Transformer's fixed residual connections (`output = x + f(x)`), AttnRes allows layer i to selectively aggregate outputs from all previous layers through learned attention weights:
+### AttnRes Gating Mechanism Explained
 
-```python
-# Standard residual
-output = fnn_out + res_out
+In each AttnRes layer, the gating network computes:
 
-# AttnRes: Dynamic weighted aggregation of previous layer outputs
-attn_weights = softmax(scores)  # Learn importance of each previous layer
-res_out = sum(attn_weights[i] * prev_outputs[i] for i in range(n))
-output = fnn_out + res_out
+```
+Gate = Sigmoid([MoE_out; Res_out] * W_g)
+Output = (1 - Gate) ⊗ MoE_out + Gate ⊗ Res_out
 ```
 
-**Key Parameters** (modifiable in config.json):
-- `vocab_size`: 65024 (ChatGLM vocabulary)
-- `d_model`: 512 (embedding dimension)
-- `d_fnn`: 1024 (feed-forward network dimension)
-- `nhead`: 8 (number of attention heads)
-- `n_layers`: 6 (number of encoder/decoder layers)
-- `dropout`: 0.1
-- `num_experts`: 8 (MoE expert count)
-- `top_k`: 2 (experts activated per token)
-- `aux_loss_coef`: 0.01 (MoE auxiliary loss coefficient)
-- `tokenizer_name`: "THUDM/chatglm-6b" (ChatGLM tokenizer)
+Where:
+- MoE_out: Mixture of Experts feed-forward network output
+- Res_out: Cross-layer residual attention output
+- W_g: Learnable gating weight matrix
+- ⊗: Element-wise multiplication
+
+This mechanism allows the model to dynamically decide, based on input semantic features, whether to emphasize innovative features (MoE output) or retain historical information (residual output), significantly enhancing modeling flexibility.
+
+### KV Cache Inference
+
+To accelerate autoregressive generation, the model caches historical key-value pairs (Key-Value pairs) during decoding:
+
+- Encoder output key-value pairs are computed and cached during the first forward pass
+- At each decoding step, only the current token's key-value pairs need to be computed and appended to the cache
+- This avoids redundant computation of historical token key-value pairs, reducing time complexity from O(n²) to O(n)
 
 ---
 
@@ -90,10 +138,10 @@ SudenMind/
 │   ├── sudenmind.pth       # Trained model
 │   └── sudenmind.onnx      # ONNX model
 ├── src/                    # Source code
-│   ├── model.py            # AttnRes model definition
+│   ├── model.py            # AttnRes model definition (with gating mechanism and KV cache)
 │   ├── data_utils.py       # ShareGPT/ChatML format data processing
 │   ├── train.py            # Training script
-│   ├── chat.py             # Interactive dialogue
+│   ├── chat.py             # Interactive dialogue (with KV cache inference)
 │   ├── moe.py              # MoE module
 │   └── view_module.py      # Model visualization
 ├── docs/                   # Documentation
@@ -110,89 +158,52 @@ All hyperparameters are managed centrally in `config.json`:
 ```json
 {
   "model": {
-    "vocab_size": 65024,
     "d_model": 512,
     "d_fnn": 1024,
     "nhead": 8,
     "n_layers": 6,
+    "dropout": 0.1,
+    "max_position_embeddings": 5000,
     "num_experts": 8,
     "top_k": 2,
+    "aux_loss_coef": 0.01,
     "tokenizer_name": "THUDM/chatglm-6b"
   },
   "training": {
     "lr": 0.0003,
-    "batch_size": 8,
+    "weight_decay": 0.01,
+    "betas": [0.9, 0.95],
+    "eps": 1e-08,
+    "warmup_ratio": 0.05,
     "max_epochs": 200,
-    "use_amp": true
+    "label_smoothing": 0,
+    "ignore_index": -100,
+    "batch_size": 1,
+    "max_norm": 5.0,
+    "patience": 30,
+    "target_loss": 0.03,
+    "use_amp": false
   },
   "data": {
-    "format": "sharegpt",
-    "max_seq_len": 512,
+    "config": "base",
+    "split": "train",
     "max_history": 5,
-    "role_markers": {
-      "user": "user",
-      "assistant": "assistant"
-    },
-    "special_tokens": {
-      "im_start": "<|im_start|>",
-      "im_end": "<|im_end|>",
-      "gmask_id": 64790,
-      "bos_id": 64792,
-      "eos_id": 2
-    }
-  }
+    "max_seq_len": 512
+  },
+  "generation": {
+    "max_length": 200,
+    "temperature": 0.3,
+    "top_k": 50,
+    "onnx_seq_len": 32,
+    "onnx_opset": 11
+  },
+  "paths": {}
 }
 ```
 
+> Note: The current config no longer explicitly stores special token markers (`<|im_start|>`, `<|im_end|>`)—they are handled via tokenizer logic in `src/data_utils.py`.
+
 ---
-
-## 📝 ShareGPT/ChatML Dialogue Format
-
-SudenMind uses the industry-standard **ShareGPT/ChatML** format:
-
-### Training Format
-
-```
-[gMASK] [BOS] <|im_start|>user
-Hello
-<|im_end|>
-<|im_start|>assistant
-Hello! I'm happy to help you.
-<|im_end|>
-<|im_start|>user
-How's the weather today?
-<|im_end|>
-<|im_start|>assistant
-The weather is great today!
-<|im_end|>
-[EOS]
-```
-
-### Inference Format
-
-```
-[gMASK] [BOS] <|im_start|>user
-Hello
-<|im_end|>
-<|im_start|>assistant
-Hello! I'm happy to help you.
-<|im_end|>
-<|im_start|>user
-How's the weather today?
-<|im_end|>
-<|im_start|>assistant
-```
-
-The model generates responses until `<|im_end|>` or `[EOS]` is encountered.
-
-### Comparison with Industry Models
-
-| Model | Format | Features |
-|-------|--------|----------|
-| **SudenMind** | ``<|im_start|>user\n{content}<|im_end|>`` | Uses ShareGPT/ChatML standard format |
-| OpenAI GPT-4 | ``<|im_start|>user<|im_sep|>{content}<|im_end|>`` | Uses `<|im_sep|>` separator |
-| Qwen | ``<|im_start|>user\n{content}<|im_end|>`` | Compatible with SudenMind format |
-| ChatGLM2/3 | ``[gMASK] [BOS] <|user|>\n{content}<|assistant|>`` | Uses special markers and role labels |
 
 ## 🚀 Quick Start
 
@@ -208,8 +219,8 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 # Or CUDA version
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-# Other dependencies
-pip install transformers datasets sentencepiece onnx onnxruntime netron
+# Other dependencies (hard version requirements)
+pip install transformers>=4.30.0 datasets>=2.0.0 sentencepiece>=0.1.99 onnx>=1.14.0 onnxruntime>=1.15.0 netron>=7.0.0
 ```
 
 ### 2. Train Model
@@ -225,7 +236,7 @@ python src/train.py
 - Cosine Annealing learning rate scheduling
 - Early stopping
 
-### 3. Dialogue Test
+### 3. Dialogue Test (with KV Cache Inference)
 
 ```bash
 python src/chat.py
@@ -293,6 +304,8 @@ MIT License
 [1] Kimi Team, et al. "Attention Residuals." arXiv preprint arXiv:2603.15031 (2026).
 [2] Du, Zhengxiao, et al. "GLM: General Language Model Pretraining with Autoregressive Blank Infilling." arXiv preprint arXiv:2103.10360 (2021).
 
+---
+
 ## 🙏 Acknowledgements
 
 - Uses [transformers](https://github.com/huggingface/transformers) library for BERT model
@@ -300,15 +313,34 @@ MIT License
 - Built with PyTorch
 
 ---
-**Version**: 6.0 (ShareGPT/ChatML format version)
-**Status**: ✅ Reconstruction Complete
+
+## 🔗 Project Links
+
+- **Official Website**: https://ai.sufun.space
+- **GitHub**: https://github.com/wangyuahn/SudenMind
+- **Documentation**: https://ai.sufun.space/docs
+
+---
+
+## 📄 Version Information
+
+**Version**: 6.1 (AttnRes Gate & KV Cache Version)  
+**Status**: ✅ Feature Enhancement Complete  
+**Last Updated**: 2026-03-29
 
 ## 🔄 Changelog
 
-### v6.0 (Current version)
+### v6.1 (Current Version)
+- **Removed gMASK token**: Simplified dialogue format, keeping only [BOS] as the sequence start token
+- **Added Gating Mechanism (Gate)**: Dynamic balancing of MoE output with cross-layer residual output
+- **Added KV Cache Inference**: Significant acceleration of autoregressive generation
+- **Optimized Model Architecture**: Improved AttnRes layer information flow mechanism
+- **Updated Website Link**: Official site migrated to ai.sufun.space
+
+### v6.0
 - **Fully reconstructed to ShareGPT/ChatML format**
 - **Removed all Chinese role prefixes** ("用户:" / "助手:")
-- **Using industry-standard format**: `<|im_start|>user/assistant`
+- **Using industry-standard format**: `授user/受assistant`
 - **Compatible with OpenAI/Qwen/ChatGLM2/3** and other mainstream model formats
 
 ### v5.0

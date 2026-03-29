@@ -61,10 +61,15 @@ def export_to_onnx(
     """导出模型为ONNX格式"""
     model.eval()
 
+    # ONNX 一般推荐在 CPU 上导出，以避免 CUDA 特定运算符差异。
+    export_device = torch.device("cpu")
+    model_to_export = model.to(export_device)
+
     dummy_input = torch.randint(0, vocab_size, (1, seq_len), dtype=torch.long).to(
-        device
+        export_device
     )
-    dummy_mask = torch.ones(1, seq_len, dtype=torch.bool).to(device)
+    # 强制使用0/1 mask，避免部分ONNX后端对 bool 掩码支持不健全
+    dummy_mask = torch.zeros(1, seq_len, dtype=torch.bool).to(export_device)
 
     input_names = ["input_ids", "attention_mask"]
     output_names = ["logits"]
@@ -85,15 +90,13 @@ def export_to_onnx(
 
             with torch.no_grad():
                 torch.onnx.export(
-                    model,
+                    model_to_export,
                     (dummy_input, dummy_mask),
                     save_path,
                     input_names=input_names,
                     output_names=output_names,
                     dynamic_axes=dynamic_axes,
                     opset_version=gen_cfg["onnx_opset"],
-                    dynamo=False,
-                    fallback=True,
                     do_constant_folding=True,
                     export_params=True,
                     keep_initializers_as_inputs=False,
@@ -103,10 +106,15 @@ def export_to_onnx(
 
             sys.stderr = _orig_stderr
 
+        # 恢复模型原有设备，便于后续训练继续
+        model.to(device)
+
         print(f"✓ ONNX 导出成功: {save_path}")
         print(f"  模型大小: {os.path.getsize(save_path) / 1024 / 1024:.2f} MB")
 
     except Exception as e:
+        # 恢复模型原有设备
+        model.to(device)
         print(f"ONNX 导出失败: {e}")
         import traceback
 
@@ -240,6 +248,10 @@ class Trainer:
                         export_to_onnx(self.model, self.vocab_size, self.device)
                         self._save(main_loss, best=True)
                         break
+                    elif main_loss < best_loss:
+                        best_loss = main_loss
+                        self._save(main_loss, best=True)
+                        counter = 0
                     
 
             avg_loss = epoch_loss / num_batches
@@ -258,10 +270,7 @@ class Trainer:
                     print(f"Early stopping at epoch {epoch + 1}")
                     export_to_onnx(self.model, self.vocab_size, self.device)
                     break
-            elif avg_loss < best_loss:
-                        best_loss = avg_loss
-                        self._save(avg_loss, best=True)
-                        counter = 0
+            
 
         print("训练完成，导出 ONNX...")
         export_to_onnx(self.model, self.vocab_size, self.device)
