@@ -173,13 +173,15 @@ class Trainer:
                 inputs = batch["input_ids"].to(self.device)
                 targets = batch["labels"].to(self.device)
                 attention_masks = batch["attention_mask"].to(self.device)
+                # 反转掩码：PyTorch MultiheadAttention中 True=mask掉（忽略），False=有效
+                key_padding_mask = ~attention_masks
                 
                 self.optimizer.zero_grad()
 
                 if self.use_amp and self.scaler is not None:
                     scaler = self.scaler
                     with autocast("cuda"):
-                        output = self.model(inputs, key_padding_mask=attention_masks)
+                        output = self.model(inputs, key_padding_mask=key_padding_mask)
                         main_loss = self.criterion(
                             output.view(-1, output.size(-1)), targets.view(-1)
                         )
@@ -197,7 +199,7 @@ class Trainer:
                     scaler.step(self.optimizer)
                     scaler.update()
                 else:
-                    output = self.model(inputs, key_padding_mask=attention_masks)
+                    output = self.model(inputs, key_padding_mask=key_padding_mask)
                     main_loss = self.criterion(
                         output.view(-1, output.size(-1)), targets.view(-1)
                     )
@@ -238,10 +240,7 @@ class Trainer:
                         export_to_onnx(self.model, self.vocab_size, self.device)
                         self._save(main_loss, best=True)
                         break
-                    elif main_loss < best_loss:
-                        best_loss = main_loss
-                        self._save(main_loss, best=True)
-                        counter = 0
+                    
 
             avg_loss = epoch_loss / num_batches
             avg_aux_loss = epoch_aux_loss / num_batches
@@ -259,6 +258,10 @@ class Trainer:
                     print(f"Early stopping at epoch {epoch + 1}")
                     export_to_onnx(self.model, self.vocab_size, self.device)
                     break
+            elif avg_loss < best_loss:
+                        best_loss = avg_loss
+                        self._save(avg_loss, best=True)
+                        counter = 0
 
         print("训练完成，导出 ONNX...")
         export_to_onnx(self.model, self.vocab_size, self.device)

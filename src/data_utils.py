@@ -1,21 +1,82 @@
-import torch
+"""
+conversation_dataset.py
+
+ShareGPT/ChatML 格式的对话数据集，适用于 ChatGLM 系列模型的微调训练。
+
+格式:
+    [BOS]<|im_start|>user\n{问题}<|im_end|>\n<|im_start|>assistant\n{回答}<|im_end|>...[EOS]
+
+Loss 计算规则:
+    - 只对 assistant 轮次的内容 token 计算 loss
+    - user / system 轮次及 [BOS] 前缀均设为 -100
+"""
+
 import os
-import json
 import re
+import json
+from typing import Dict, List, Optional, Tuple
+
+import torch
 from torch.utils.data import Dataset
-from typing import List, Tuple, Optional, Dict
 from transformers import AutoTokenizer
 from datasets import load_dataset
 
-# ShareGPT/ChatML 格式常量
-IM_START, IM_END = "<|im_start|>", "<|im_end|>"
-ROLE_USER, ROLE_ASSISTANT, ROLE_SYSTEM = "user", "assistant", "system"
+
+# ─────────────────────────── 常量 ────────────────────────────
+
+IM_START = "<|im_start|>"
+IM_END = "<|im_end|>"
+
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
+ROLE_SYSTEM = "system"
+
+
+# ─────────────────────────── 工具函数 ────────────────────────────
+
+
+def clean_chinese_text(text: str) -> str:
+    """清洗中文文本：去除汉字间多余空格及标点前后空格。"""
+    if not text:
+        return text
+    # 去除相邻中文字符间的空格
+    text = re.sub(r"([\u4e00-\u9fff])\s+([\u4e00-\u9fff])", r"\1\2", text)
+    # 去除中文标点前的空格
+    text = re.sub(r'\s+([，。！？；："\'《》【】（）])', r"\1", text)
+    # 去除中文标点后的空格
+    text = re.sub(r'([，！？；："\'《》【】（）])\s+', r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def extract_response(text: str) -> str:
+    """从生成文本中提取最后一段 assistant 回复内容。"""
+    if not text:
+        return ""
+    marker = f"{IM_START}{ROLE_ASSISTANT}\n"
+    idx = text.rfind(marker)  # 取最后一个 assistant 块
+    if idx == -1:
+        return text.strip()
+    content = text[idx + len(marker) :]
+    return content.split(IM_END)[0].strip()
+
+
+# ─────────────────────────── 数据集 ────────────────────────────
 
 
 class ConversationDataset(Dataset):
     """
-    ShareGPT/ChatML 格式的对话数据集。
-    格式: [gMASK] [BOS] <|im_start|>user\n{问题}<|im_end|>\n<|im_start|>assistant\n{回答}<|im_end|> ... [EOS]
+    加载 LCCC 数据集并编码为 ChatML 格式，供语言模型监督微调（SFT）使用。
+
+    Args:
+        split:          数据集分割，如 "train" / "validation"
+        config:         LCCC 子集，"base" 或 "large"
+        max_history:    保留最近的对话轮数（user+assistant 各算一轮）
+        max_length:     token 序列最大长度（含 BOS/EOS）
+        tokenizer_name: HuggingFace tokenizer 名称或本地路径
+        test_mode:      True 时仅加载前 100 条，用于调试
+        cache_dir:      本地缓存目录
+        use_cache:      是否使用本地 JSON 缓存
+        clean_spaces:   是否清洗中文文本空格
     """
 
     def __init__(
@@ -30,57 +91,56 @@ class ConversationDataset(Dataset):
         use_cache: bool = True,
         clean_spaces: bool = True,
     ):
-        self.split, self.config = split, config
-        self.max_history, self.max_length = max_history, max_length
-        self.test_mode, self.clean_spaces = test_mode, clean_spaces
+        self.split = split
+        self.config = config
+        self.max_history = max_history
+        self.max_length = max_length
+        self.test_mode = test_mode
+        self.clean_spaces = clean_spaces
         self.cache_dir = cache_dir or "data/cache"
         self.use_cache = use_cache
 
-        # 加载 tokenizer
-        print(f"加载 tokenizer: {tokenizer_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_name, trust_remote_code=True
-        )
-
-        # 设置特殊 token
+        self.tokenizer = self._load_tokenizer(tokenizer_name)
         self._setup_special_tokens()
-
-        # 加载数据
         self._load_data()
 
+    # ── 初始化 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _load_tokenizer(tokenizer_name: str) -> AutoTokenizer:
+        print(f"加载 tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name, trust_remote_code=True
+        )
+        # 确保 ChatML 特殊 token 已注册为独立 token
+        new_tokens = [
+            t
+            for t in (IM_START, IM_END)
+            if t not in tokenizer.additional_special_tokens
+        ]
+        if new_tokens:
+            tokenizer.add_special_tokens({"additional_special_tokens": new_tokens})
+        return tokenizer
+
     def _setup_special_tokens(self):
-        """设置 ChatGLM 和 ShareGPT 特殊 token。"""
-        # ChatGLM-6B 常量
-        self.gmask_id = 64790
-        self.bos_id = 64792
-        self.eos_id = getattr(self.tokenizer, "eos_token_id", 2)
-        self.pad_id = getattr(self.tokenizer, "pad_token_id", 3)
+        """缓存常用 token ID，避免重复查询。"""
+        tok = self.tokenizer
+        self.bos_id = tok.bos_token_id
+        self.eos_id = tok.eos_token_id
+        self.pad_id = tok.pad_token_id
+        self.im_start_id = tok.convert_tokens_to_ids(IM_START)
+        self.im_end_id = tok.convert_tokens_to_ids(IM_END)
 
-        # 添加 ShareGPT token（确保 <|im_start|> 是一个独立 token）
-        try:
-            self.tokenizer.add_special_tokens(
-                {"additional_special_tokens": [IM_START, IM_END]}
-            )
-            self.im_start_id = self.tokenizer.convert_tokens_to_ids(IM_START)
-            self.im_end_id = self.tokenizer.convert_tokens_to_ids(IM_END)
-        except Exception as e:
-            print(f"警告: 添加特殊 token 失败: {e}")
-            self.im_start_id = self.im_end_id = None
-
-        # 缓存换行符 token ID
-        newline_tokens = self._encode_text("\n")
-        self.newline_id = newline_tokens[0] if newline_tokens else 10
+        nl = tok.encode("\n", add_special_tokens=False)
+        self.newline_id = nl[0] if nl else 10  # fallback: LF 的常见 ID
 
         print(
-            f"词表大小: {len(self.tokenizer)}, gMASK: {self.gmask_id}, BOS: {self.bos_id}"
+            f"词表大小={len(tok)}  BOS={self.bos_id}  EOS={self.eos_id}  "
+            f"im_start={self.im_start_id}  im_end={self.im_end_id}"
         )
 
-    def _encode_text(self, text: str) -> List[int]:
-        """文本编码为 token ID 列表。"""
-        return self.tokenizer.encode(text, add_special_tokens=False)
-
     def _load_data(self):
-        """从缓存加载或下载数据集。"""
+        """优先从本地 JSON 缓存加载；缓存不存在时下载并保存。"""
         cache_file = os.path.join(
             self.cache_dir, f"lccc_{self.config}_{self.split}.json"
         )
@@ -92,19 +152,18 @@ class ConversationDataset(Dataset):
             print(f"已加载 {len(self.dataset)} 条对话")
             return
 
-        print(f"加载 LCCC: thu-coai/lccc, config={self.config}, split={self.split}")
         split_str = f"{self.split}[:100]" if self.test_mode else self.split
+        print(f"下载数据集: thu-coai/lccc  config={self.config}  split={split_str}")
         raw = load_dataset("thu-coai/lccc", self.config, split=split_str)
 
-        self.dataset = [
-            {
-                "dialog": [self._clean_text(u) for u in item["dialog"]]
-                if self.clean_spaces
-                else item["dialog"]
-            }
-            for item in raw
-            if len(item.get("dialog", [])) >= 2
-        ]
+        self.dataset = []
+        for item in raw:
+            dialog = item.get("dialog", [])
+            if len(dialog) < 2:
+                continue
+            if self.clean_spaces:
+                dialog = [clean_chinese_text(u) for u in dialog]
+            self.dataset.append({"dialog": dialog})
 
         print(f"已加载 {len(self.dataset)} 条对话")
 
@@ -114,20 +173,7 @@ class ConversationDataset(Dataset):
                 json.dump(self.dataset, f, ensure_ascii=False)
             print(f"已缓存到: {cache_file}")
 
-    @staticmethod
-    def _clean_text(text: str) -> str:
-        """清洗中文文本中的空格。"""
-        if not text:
-            return text
-        # 移除中文字符间的空格
-        text = re.sub(r"([\u4e00-\u9fff])\s+([\u4e00-\u9fff])", r"\1\2", text)
-        # 移除中文标点前后的空格
-        for pat in [
-            r'\s+([，。！？；："\'《》【】（）])',
-            r'([，！？；："\'《》【】（）])\s+',
-        ]:
-            text = re.sub(pat, r"\1", text)
-        return re.sub(r"\s+", " ", text).strip()
+    # ── Dataset 接口 ────────────────────────────────────────
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -138,88 +184,116 @@ class ConversationDataset(Dataset):
         if len(dialog) < 2:
             return self._dummy_sample()
 
-        # 确保偶数轮次并限制历史长度
-        dialog = (
-            dialog[-self.max_history * 2 :]
-            if len(dialog) > self.max_history * 2
-            else dialog
-        )
+        # 截取最近 N 轮并保证偶数（user/assistant 成对）
+        dialog = dialog[-(self.max_history * 2) :]
         if len(dialog) % 2 != 0:
             dialog = dialog[:-1]
 
-        # 构建完整序列: [gMASK] [BOS] <对话> [EOS]
-        full_tokens = (
-            [self.gmask_id, self.bos_id]
-            + self._build_dialog_tokens(dialog)
-            + [self.eos_id]
-        )
+        # 编码为完整 token 序列: [BOS] <对话> [EOS]
+        dialog_tokens = self._build_dialog_tokens(dialog)
+        full_tokens = [self.bos_id] + dialog_tokens + [self.eos_id]
         full_tokens = full_tokens[: self.max_length]
 
-        # 找到助手回答的开始位置
-        assistant_start_pos = self._find_assistant_start_position(full_tokens, dialog)
-        
-        # 创建labels: 助手回答之前的部分设为-100（不计算损失）
-        labels = [-100] * len(full_tokens)
-        if assistant_start_pos < len(full_tokens):
-            # 助手回答部分正常计算损失
-            labels[assistant_start_pos:] = full_tokens[assistant_start_pos:]
+        # 按轮次构建 labels（只对 assistant 计算 loss）
+        labels = self._build_labels(full_tokens, dialog)
 
-        # 自回归训练：input_ids是完整序列（去掉最后一个token）
-        # labels是向右偏移一个位置的序列
+        # 自回归偏移：input = full[:-1]，label = full[1:]
         return {
             "input_ids": torch.tensor(full_tokens[:-1], dtype=torch.long),
             "labels": torch.tensor(labels[1:], dtype=torch.long),
             "attention_mask": torch.ones(len(full_tokens) - 1, dtype=torch.bool),
         }
 
+    # ── Token 构建 ──────────────────────────────────────────
+
+    def _encode(self, text: str) -> List[int]:
+        return self.tokenizer.encode(text, add_special_tokens=False)
+
+    def _role_header_tokens(self, role: str) -> List[int]:
+        """生成角色头部: <|im_start|>role\n"""
+        return [self.im_start_id] + self._encode(role) + [self.newline_id]
+
     def _build_dialog_tokens(self, dialog: List[str]) -> List[int]:
-        """将对话构建为 ShareGPT 格式的 token 列表。
+        """
+        将对话列表编码为 ChatML token 序列。
 
         格式: <|im_start|>user\n内容<|im_end|>\n<|im_start|>assistant\n内容<|im_end|>...
         """
-        tokens = []
+        tokens: List[int] = []
         for i, content in enumerate(dialog):
             role = ROLE_USER if i % 2 == 0 else ROLE_ASSISTANT
-
-            # 构建: <|im_start|>role\ncontent<|im_end|>\n
-            tokens.extend(
-                [self.im_start_id] if self.im_start_id else self._encode_text(IM_START)
-            )
-            tokens.extend(self._encode_text(role))
-            tokens.append(self.newline_id)
-            tokens.extend(self._encode_text(content))
-            tokens.extend(
-                [self.im_end_id] if self.im_end_id else self._encode_text(IM_END)
-            )
+            tokens += self._role_header_tokens(role)
+            tokens += self._encode(content)
+            tokens += [self.im_end_id]
             if i < len(dialog) - 1:
-                tokens.append(self.newline_id)
-
+                tokens += [self.newline_id]
         return tokens
-    
-    def _find_assistant_start_position(self, full_tokens: List[int], dialog: List[str]) -> int:
-        """找到助手回答在token序列中的开始位置。"""
-        # 找到最后一个助手回复的开始
-        for i in range(len(dialog)-1, -1, -1):
-            if i % 2 == 1:  # 助手轮次
-                # 构建助手开头的token序列
-                role = ROLE_ASSISTANT
-                assistant_start = []
-                assistant_start.extend([self.im_start_id] if self.im_start_id else self._encode_text(IM_START))
-                assistant_start.extend(self._encode_text(role))
-                assistant_start.append(self.newline_id)
-                
-                # 在full_tokens中查找这个模式
-                pattern = assistant_start
-                for pos in range(len(full_tokens) - len(pattern) + 1):
-                    if full_tokens[pos:pos+len(pattern)] == pattern:
-                        return pos + len(pattern)  # 返回助手内容开始的位置
-        
-        # 如果找不到，默认从中间位置开始
-        return len(full_tokens) // 2
+
+    def _build_labels(self, full_tokens: List[int], dialog: List[str]) -> List[int]:
+        """
+        构建 labels 列表（与 full_tokens 等长）。
+
+        规则:
+        - [BOS] 前缀      → -100
+        - user 轮次全部   → -100
+        - assistant 轮次内容部分  → 与 full_tokens 相同（参与 loss）
+        - 角色头/im_end/newline → -100
+        - [EOS]           → 参与 loss
+
+        注意：正确处理 newline 分隔符，确保标签位置与实际 token 序列一致
+        """
+        labels = [-100] * len(full_tokens)
+        pos = 1  # 跳过 BOS
+
+        for i, content in enumerate(dialog):
+            role = ROLE_USER if i % 2 == 0 else ROLE_ASSISTANT
+            is_assistant = i % 2 == 1
+
+            # 构建该轮的 tokens 并精确追踪各部分位置
+            header_tokens = self._role_header_tokens(role)  # [im_start] + [role] + [newline]
+            content_tokens = self._encode(content)
+            end_token = [self.im_end_id]
+
+            # 角色头部分长度
+            header_len = len(header_tokens)
+            content_len = len(content_tokens)
+
+            # 该轮 tokens 总长度（不含分隔 newline）
+            turn_len = header_len + content_len + len(end_token)
+
+            # 计算该轮在 full_tokens 中的范围
+            turn_start = pos
+            turn_end = min(pos + turn_len, len(full_tokens))
+
+            # 如果是 assistant 轮，标记内容部分
+            if is_assistant:
+                content_start = turn_start + header_len
+                content_end = min(content_start + content_len, len(full_tokens))
+                # 只标记内容部分，不标记头部和 im_end
+                if content_start < len(full_tokens):
+                    labels[content_start:content_end] = full_tokens[content_start:content_end]
+
+            # 移动位置到该轮末尾
+            pos = turn_end
+
+            # 如果不是最后一轮，还要跳过分隔 newline
+            if i < len(dialog) - 1 and pos < len(full_tokens):
+                pos += 1  # 跳过分隔的 newline
+
+            if pos >= len(full_tokens):
+                break
+
+        # EOS token 参与 loss（若存在且未被截断）
+        if pos < len(full_tokens) and full_tokens[pos] == self.eos_id:
+            labels[pos] = full_tokens[pos]
+
+        return labels
+
+    # ── 工具 ────────────────────────────────────────────────
 
     def _dummy_sample(self) -> Dict[str, torch.Tensor]:
-        """为无效数据创建空样本。"""
-        ids = [self.gmask_id, self.bos_id, self.eos_id]
+        """为无效/过短样本生成占位输出。"""
+        ids = [self.bos_id, self.eos_id]
         return {
             "input_ids": torch.tensor(ids[:-1], dtype=torch.long),
             "labels": torch.tensor(ids[1:], dtype=torch.long),
@@ -227,23 +301,28 @@ class ConversationDataset(Dataset):
         }
 
 
+# ─────────────────────────── 批处理 ────────────────────────────
+
+
 def collate_conversation_batch(
     batch: List[Dict[str, torch.Tensor]],
 ) -> Dict[str, torch.Tensor]:
-    """批处理填充函数。"""
-    max_len = max(len(item["input_ids"]) for item in batch)
+    """
+    将长度不一的样本 pad 到批内最大长度。
 
-    def pad(sequences, pad_value):
-        return torch.stack(
-            [
-                torch.cat(
-                    [seq, torch.full((max_len - len(seq),), pad_value, dtype=seq.dtype)]
-                )
-                if len(seq) < max_len
-                else seq
-                for seq in sequences
-            ]
-        )
+    - input_ids / attention_mask 用 0 填充
+    - labels 用 -100 填充（不计入 loss）
+    """
+    max_len = max(item["input_ids"].size(0) for item in batch)
+
+    def pad(seqs: List[torch.Tensor], pad_val: int) -> torch.Tensor:
+        result = []
+        for seq in seqs:
+            gap = max_len - seq.size(0)
+            if gap > 0:
+                seq = torch.cat([seq, seq.new_full((gap,), pad_val)])
+            result.append(seq)
+        return torch.stack(result)
 
     return {
         "input_ids": pad([b["input_ids"] for b in batch], 0),
@@ -252,35 +331,45 @@ def collate_conversation_batch(
     }
 
 
+# ─────────────────────────── 推理工具 ────────────────────────────
+
+
 def format_conversation_for_inference(
     history: List[Tuple[str, str]],
     current_input: str,
     max_history: int = 5,
 ) -> str:
-    """格式化对话用于推理（ShareGPT 格式）。
+    """
+    将历史对话 + 当前输入格式化为推理用的 ChatML 文本。
+
+    生成文本末尾以 <|im_start|>assistant 结尾，留给模型续写。
 
     Args:
-        history: 历史对话列表，每项为 (角色, 内容)
+        history:       历史对话，每项为 (role, content)，role 支持中英文
         current_input: 当前用户输入
-        max_history: 最大历史轮数
+        max_history:   保留最近 N 条历史
 
     Returns:
-        格式化后的对话文本（不含 assistant 结尾标记）
+        ChatML 格式字符串（不含 EOS）
     """
-    # 清洗并规范化角色名
-    history = history[-max_history:] if len(history) > max_history else history
-    cleaned = []
-    for role, content in history:
-        role = ROLE_USER if role in ("用户", "user", "User") else ROLE_ASSISTANT
-        cleaned.append((role, ConversationDataset._clean_text(content)))
+    _role_map = {
+        "用户": ROLE_USER,
+        "user": ROLE_USER,
+        "User": ROLE_USER,
+        "助手": ROLE_ASSISTANT,
+        "assistant": ROLE_ASSISTANT,
+    }
 
-    current = ConversationDataset._clean_text(current_input)
+    recent = history[-max_history:]
+    lines: List[str] = []
 
-    # 构建文本
-    lines = [f"{IM_START}{r}\n{c}{IM_END}" for r, c in cleaned]
-    lines.extend(
-        [f"{IM_START}{ROLE_USER}\n{current}{IM_END}", f"{IM_START}{ROLE_ASSISTANT}"]
-    )
+    for raw_role, content in recent:
+        role = _role_map.get(raw_role, ROLE_USER)
+        lines.append(f"{IM_START}{role}\n{clean_chinese_text(content)}{IM_END}")
+
+    current = clean_chinese_text(current_input)
+    lines.append(f"{IM_START}{ROLE_USER}\n{current}{IM_END}")
+    lines.append(f"{IM_START}{ROLE_ASSISTANT}")
 
     return "\n".join(lines)
 
@@ -288,48 +377,60 @@ def format_conversation_for_inference(
 def build_model_input(
     text: str,
     tokenizer: AutoTokenizer,
-    gmask_id: int = 64790,
-    bos_id: int = 64792,
     max_length: int = 512,
 ) -> Dict[str, torch.Tensor]:
-    """从格式化文本构建模型输入。
-
-    格式: [gMASK] [BOS] text
-
-    注意: 正确处理特殊 token <|im_start|> 和 <|im_end|>
     """
-    # 确保特殊 token 已添加
-    if IM_START not in getattr(tokenizer, "additional_special_tokens", []):
-        tokenizer.add_special_tokens({"additional_special_tokens": [IM_START, IM_END]})
+    将 ChatML 格式文本编码为模型输入张量。
+
+    格式: [BOS] + ChatML tokens
+
+    Args:
+        text:       由 format_conversation_for_inference 生成的文本
+        tokenizer:  已加载的 tokenizer（需包含 im_start/im_end 特殊 token）
+        max_length: 最大 token 长度（含 BOS）
+
+    Returns:
+        包含 input_ids 和 attention_mask 的字典（batch_size=1）
+    """
+    # 确保特殊 token 已注册
+    new_tokens = [
+        t for t in (IM_START, IM_END) if t not in tokenizer.additional_special_tokens
+    ]
+    if new_tokens:
+        tokenizer.add_special_tokens({"additional_special_tokens": new_tokens})
 
     im_start_id = tokenizer.convert_tokens_to_ids(IM_START)
     im_end_id = tokenizer.convert_tokens_to_ids(IM_END)
-    newline_tokens = tokenizer.encode("\n", add_special_tokens=False)
-    newline_id = newline_tokens[0] if newline_tokens else 10
+    nl = tokenizer.encode("\n", add_special_tokens=False)
+    newline_id = nl[0] if nl else 10
 
-    # 解析并编码文本
-    tokens = []
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if line.startswith(IM_START):
-            tokens.append(im_start_id)
-            tokens.extend(
-                tokenizer.encode(line[len(IM_START) :], add_special_tokens=False)
-            )
-        elif line.endswith(IM_END):
-            tokens.extend(
-                tokenizer.encode(line[: -len(IM_END)], add_special_tokens=False)
-            )
+    def encode(s: str) -> List[int]:
+        return tokenizer.encode(s, add_special_tokens=False)
+
+    # 按行解析 ChatML 文本，正确识别特殊 token
+    # 注意：内容本身可能包含换行符，因此以 IM_START 为块分隔符
+    tokens: List[int] = []
+    blocks = text.split(IM_START)  # 每个块: "role\ncontent<|im_end|>..." 或 ""
+
+    for i, block in enumerate(blocks):
+        if not block:
+            continue
+        tokens.append(im_start_id)
+
+        if IM_END in block:
+            # 正常块: role\ncontent<|im_end|>后续文本
+            inner, rest = block.split(IM_END, 1)
+            tokens.extend(encode(inner))
             tokens.append(im_end_id)
-        elif line == IM_END:
-            tokens.append(im_end_id)
+            if rest:
+                tokens.extend(encode(rest))
         else:
-            tokens.extend(tokenizer.encode(line, add_special_tokens=False))
-        if i < len(lines) - 1:
-            tokens.append(newline_id)
+            # 最后一个不完整块（推理时 assistant 开头）
+            tokens.extend(encode(block))
 
-    tokens = tokens[: max_length - 3]
-    input_ids = [gmask_id, bos_id] + tokens
+    # 截断并添加前缀
+    tokens = tokens[: max_length - 1]
+    input_ids = [tokenizer.bos_token_id] + tokens
 
     return {
         "input_ids": torch.tensor([input_ids], dtype=torch.long),
@@ -337,64 +438,48 @@ def build_model_input(
     }
 
 
-def extract_response(text: str) -> str:
-    """从生成文本中提取助手回复。"""
-    if not text:
-        return ""
-
-    # 正确的助手开始模式：<|im_start|>assistant\n
-    assistant_start = f"{IM_START}{ROLE_ASSISTANT}\n"
-
-    if assistant_start not in text:
-        # 如果没有找到助手标记，返回整个文本（可能是模型直接生成的回答）
-        return text.strip()
-
-    idx = text.find(assistant_start) + len(assistant_start)
-    remaining = text[idx:]
-
-    if IM_END in remaining:
-        response = remaining.split(IM_END)[0]
-        if response.strip():
-            return response.strip()
-
-    return remaining.strip()
+# ─────────────────────────── Tokenizer 单例 ────────────────────────────
 
 
 class TokenizerHelper:
-    """Tokenizer 辅助类（单例模式，复用 tokenizer）。"""
+    """
+    轻量级 tokenizer 单例封装，避免重复加载模型。
+
+    Usage:
+        helper = TokenizerHelper("THUDM/chatglm-6b")
+        ids = helper.encode("你好")
+        text = helper.decode(ids)
+    """
 
     _instances: Dict[str, "TokenizerHelper"] = {}
 
-    def __new__(cls, tokenizer_name: str = "THUDM/chatglm-6b"):
+    def __new__(cls, tokenizer_name: str = "THUDM/chatglm-6b") -> "TokenizerHelper":
         if tokenizer_name not in cls._instances:
-            cls._instances[tokenizer_name] = super().__new__(cls)
-            cls._instances[tokenizer_name]._initialized = False
+            instance = super().__new__(cls)
+            instance._tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_name, trust_remote_code=True
+            )
+            cls._instances[tokenizer_name] = instance
         return cls._instances[tokenizer_name]
 
-    def __init__(self, tokenizer_name: str = "THUDM/chatglm-6b"):
-        if self._initialized:
-            return
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_name, trust_remote_code=True
-        )
-        self._initialized = True
-
     def encode(self, text: str, clean_spaces: bool = True) -> List[int]:
-        """文本编码为 token ID 列表。"""
         if clean_spaces:
-            text = ConversationDataset._clean_text(text)
-        return self.tokenizer.encode(text, add_special_tokens=False)
+            text = clean_chinese_text(text)
+        return self._tokenizer.encode(text, add_special_tokens=False)
 
     def decode(self, token_ids: List[int], skip_special_tokens: bool = True) -> str:
-        """token ID 列表解码为文本。"""
-        return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
+        return self._tokenizer.decode(
+            token_ids, skip_special_tokens=skip_special_tokens
+        )
 
 
-# 便捷函数（使用 TokenizerHelper 单例）
+# 便捷函数
 def sentence_to_ids(
-    sentence: str, tokenizer_name: str = "THUDM/chatglm-6b", clean_spaces: bool = True
+    sentence: str,
+    tokenizer_name: str = "THUDM/chatglm-6b",
+    clean_spaces: bool = True,
 ) -> List[int]:
-    """句子转为 token ID 列表。"""
+    """句子 → token ID 列表。"""
     return TokenizerHelper(tokenizer_name).encode(sentence, clean_spaces)
 
 
@@ -403,5 +488,5 @@ def ids_to_sentence(
     tokenizer_name: str = "THUDM/chatglm-6b",
     skip_special_tokens: bool = True,
 ) -> str:
-    """token ID 列表转为句子。"""
+    """token ID 列表 → 句子。"""
     return TokenizerHelper(tokenizer_name).decode(token_ids, skip_special_tokens)

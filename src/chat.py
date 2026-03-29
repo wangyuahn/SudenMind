@@ -1,61 +1,45 @@
-import torch
-import json
 import os
+import json
+import sys
+
+import torch
+from transformers import AutoTokenizer
+
 from model import SudenMind
 from data_utils import (
+    clean_chinese_text,
+    extract_response,
     format_conversation_for_inference,
     build_model_input,
-    extract_response,
-    ConversationDataset,
     IM_START,
     IM_END,
     ROLE_USER,
     ROLE_ASSISTANT,
 )
-from transformers import AutoTokenizer
 
-DEBUG = True
-GMASK_ID = 64790
-BOS_ID = 64792
+DEBUG        = True
 USE_EOS_STOP = True
 
 
-def chat():
-    """交互式对话"""
-    # 加载配置
-    cfg = json.load(open("config.json", "r", encoding="utf-8"))
-    model_cfg = cfg["model"]
-    gen_cfg = cfg["generation"]
-    data_cfg = cfg["data"]
+def _load_tokenizer(tokenizer_name: str) -> AutoTokenizer:
+    print(f"加载 tokenizer: {tokenizer_name}")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"正在使用 {device} 进行推理...")
+    new_tokens = [
+        t for t in (IM_START, IM_END)
+        if t not in tokenizer.additional_special_tokens
+    ]
+    if new_tokens:
+        tokenizer.add_special_tokens({"additional_special_tokens": new_tokens})
 
-    # 加载ChatGLM tokenizer
-    tokenizer_name = model_cfg.get("tokenizer_name", "THUDM/chatglm-6b")
-    print(f"正在加载ChatGLM tokenizer: {tokenizer_name}")
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_name,
-        trust_remote_code=True,
+    print(
+        f"词表大小: {len(tokenizer)}  "
+        f"BOS={tokenizer.bos_token_id}  EOS={tokenizer.eos_token_id}"
     )
+    return tokenizer
 
-    # 添加 ShareGPT/ChatML 特殊标记
-    try:
-        tokenizer.add_special_tokens({"additional_special_tokens": [IM_START, IM_END]})
-        vocab_size = len(tokenizer)
-    except Exception as e:
-        print(f"添加特殊标记失败: {e}")
-        vocab_size = 65024
 
-    print(f"ChatGLM词表大小: {vocab_size}")
-
-    # ChatGLM特殊token
-    gmask_token_id = GMASK_ID
-    bos_token_id = BOS_ID
-    print(f"  [gMASK] ID: {gmask_token_id}")
-    print(f"  [BOS] ID: {bos_token_id}")
-
-    # 初始化模型
+def _load_model(model_cfg: dict, vocab_size: int, device: torch.device) -> SudenMind:
     model = SudenMind(
         vocab_size=vocab_size,
         d_model=model_cfg["d_model"],
@@ -71,29 +55,43 @@ def chat():
 
     model_path = "model/sudenmind.pth"
     if not os.path.exists(model_path):
-        print(f"错误：未找到模型权重文件 {model_path}，请先运行 train.py 进行训练。")
-        return
+        raise FileNotFoundError(f"未找到模型权重: {model_path}，请先运行 train.py")
 
-    # 加载权重，处理词表扩展情况
     state_dict = torch.load(model_path, map_location=device)
-    embedding_weight = state_dict.get("token_embedding.weight")
-    if embedding_weight is not None and embedding_weight.shape[0] != vocab_size:
-        print(f"词表大小不匹配: 权重={embedding_weight.shape[0]}, 当前={vocab_size}")
-        print("重新初始化 token embedding 和输出层...")
+
+    # 处理词表扩展
+    emb = state_dict.get("token_embedding.weight")
+    if emb is not None and emb.shape[0] != vocab_size:
+        print(f"词表不匹配 (权重={emb.shape[0]}, 当前={vocab_size})，重建 embedding")
         del state_dict["token_embedding.weight"]
         del state_dict["fc.3.weight"]
         del state_dict["fc.3.bias"]
 
     model.load_state_dict(state_dict, strict=False)
     model.eval()
+    return model
+
+
+def chat():
+    cfg       = json.load(open("config.json", "r", encoding="utf-8"))
+    model_cfg = cfg["model"]
+    gen_cfg   = cfg["generation"]
+    data_cfg  = cfg["data"]
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"使用设备: {device}")
+
+    tokenizer   = _load_tokenizer(model_cfg.get("tokenizer_name", "THUDM/chatglm-6b"))
+    model       = _load_model(model_cfg, len(tokenizer), device)
+    max_history = data_cfg.get("max_history", 5)
+
     print("\n" + "=" * 50)
-    print("SudenMind 对话系统 (ShareGPT/ChatML 格式)")
+    print("SudenMind 对话系统")
     print("=" * 50)
-    print("命令: 'quit' 退出 | 'clear' 清空历史 | 'history' 查看历史")
+    print("quit/exit — 退出 | clear — 清空 | history — 历史")
     print("-" * 50)
 
-    conversation_history = []  # [(role, content), ...]
-    max_history = data_cfg.get("max_history", 5)
+    history = []
 
     while True:
         try:
@@ -104,40 +102,36 @@ def chat():
         if not user_input:
             continue
 
-        # 处理命令
-        if user_input.lower() in ["quit", "exit", "q"]:
-            print("\nAssistant: 再见！")
+        if user_input.lower() in ("quit", "exit", "q"):
+            print("Assistant: 再见！")
             break
 
-        if user_input.lower() in ["clear", "reset"]:
-            conversation_history = []
-            print("Assistant: 对话历史已清空")
+        if user_input.lower() in ("clear", "reset"):
+            history = []
+            print("Assistant: 已清空历史")
             continue
 
-        if user_input.lower() in ["history", "h"]:
+        if user_input.lower() in ("history", "h"):
             print("\n--- 对话历史 ---")
-            for role, content in conversation_history:
-                display_role = "You" if role == ROLE_USER else "Assistant"
-                print(f"{display_role}: {content}")
+            for role, content in history:
+                print(f"{'You' if role == ROLE_USER else 'Assistant'}: {content}")
             print("----------------")
             continue
 
-        # 格式化输入（ShareGPT格式）
+        # 构造输入
         prompt = format_conversation_for_inference(
-            conversation_history, user_input, max_history
+            history, user_input, max_history
         )
 
-        # 构建模型输入
         input_dict = build_model_input(
             prompt,
             tokenizer,
-            gmask_id=gmask_token_id,
-            bos_id=bos_token_id,
             max_length=data_cfg.get("max_seq_len", 512),
         )
-        input_tensor = input_dict["input_ids"].to(device)
 
-        # 生成回复
+        # ⭐ 修复：必须有 batch 维
+        input_tensor = input_dict["input_ids"].unsqueeze(0).to(device)
+
         with torch.no_grad():
             output_tensor = model.generate(
                 input_seq=input_tensor,
@@ -145,88 +139,47 @@ def chat():
                 temperature=gen_cfg["temperature"],
                 device=device,
                 use_eos_stop=USE_EOS_STOP,
+                eos_token_id=tokenizer.eos_token_id,
             )
 
-        # 解码生成的文本
-        generated_ids = output_tensor[0].tolist()
-        full_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+        full_text = tokenizer.decode(
+            output_tensor[0].tolist(),
+            skip_special_tokens=False,
+        )
 
         if DEBUG:
-            print(f"[DEBUG] full_text: {full_text[:500]}")
+            print(f"[DEBUG] {full_text[:500]}")
 
-        # 提取助手回复
-        response_text = extract_response(full_text)
-        response_text = ConversationDataset._clean_text(response_text)
+        response = clean_chinese_text(extract_response(full_text))
+        print(f"Assistant: {response}")
 
-        print(f"Assistant: {response_text}")
+        history.append((ROLE_USER, user_input))
+        history.append((ROLE_ASSISTANT, response))
 
-        # 更新对话历史
-        conversation_history.append((ROLE_USER, user_input))
-        conversation_history.append((ROLE_ASSISTANT, response_text))
-
-        # 限制历史长度
-        max_turns = max_history * 2
-        if len(conversation_history) > max_turns:
-            conversation_history = conversation_history[-max_turns:]
+        if len(history) > max_history * 2:
+            history = history[-(max_history * 2):]
 
 
 def test_tokenizer():
-    """测试tokenizer"""
-    print("=== 测试 ShareGPT/ChatML 格式 ===\n")
+    tokenizer = _load_tokenizer("THUDM/chatglm-6b")
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        "THUDM/chatglm-6b", trust_remote_code=True
+    sample = (
+        f"{IM_START}user\n你好{IM_END}\n"
+        f"{IM_START}assistant\n你好！很高兴为你服务。{IM_END}"
     )
 
-    # 添加特殊标记
-    tokenizer.add_special_tokens({"additional_special_tokens": [IM_START, IM_END]})
-    print(f"词表大小（添加特殊标记后）: {tokenizer.vocab_size}")
-    print(f"'<|im_start|>' ID: {tokenizer.convert_tokens_to_ids(IM_START)}")
-    print(f"'<|im_end|>' ID: {tokenizer.convert_tokens_to_ids(IM_END)}")
-    print()
+    print("原始:\n", sample)
 
-    # 测试文本
-    conversation = """<|im_start|>user
-你好
-<|im_end|>
-<|im_start|>assistant
-你好！很高兴为你服务。
-<|im_end|>"""
+    token_ids = tokenizer.encode(sample, add_special_tokens=False)
+    print(f"\nToken IDs ({len(token_ids)}): {token_ids}")
 
-    print("原始对话格式:")
-    print(conversation)
-    print()
+    full_ids = [tokenizer.bos_token_id] + token_ids + [tokenizer.eos_token_id]
+    print("完整 IDs:", full_ids)
 
-    # 编码
-    token_ids = tokenizer.encode(conversation, add_special_tokens=False)
-    print(f"Token IDs: {token_ids}")
-    print(f"Token数量: {len(token_ids)}")
-    print()
-
-    # ChatGLM完整格式
-    gmask_id = 64790
-    bos_id = 64792
-    eos_id = 2
-
-    full_ids = [gmask_id, bos_id] + token_ids + [eos_id]
-    print(f"完整输入 IDs: {full_ids}")
-    print()
-
-    # 解码
-    decoded = tokenizer.decode(full_ids, skip_special_tokens=False)
-    print("解码结果:")
-    print(decoded)
-
-    print("\n=== 特殊Token ===")
-    print(f"[gMASK] ID: {gmask_id}")
-    print(f"[BOS] ID: {bos_id}")
-    print(f"[EOS] ID: {eos_id}")
-    print(f"词表大小: {tokenizer.vocab_size}")
+    print("\n解码:\n", tokenizer.decode(full_ids, skip_special_tokens=False))
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) > 1 and sys.argv[1] == "--test-tokenizer":
         test_tokenizer()
     else:

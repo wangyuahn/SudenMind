@@ -1,6 +1,5 @@
 {
     "model": {
-        "vocab_size": 65026,
         "d_model": 512,
         "d_fnn": 1024,
         "nhead": 8,
@@ -17,7 +16,7 @@
         "weight_decay": 0.01,
         "betas": [0.9, 0.95],
         "eps": 1e-08,
-        "warmup_ratio": 0.00000000000000001,
+        "warmup_ratio": 0.05,
         "max_epochs": 200,
         "label_smoothing": 0,
         "ignore_index": -100,
@@ -28,39 +27,17 @@
         "use_amp": false
     },
     "data": {
-        "dataset_name": "lccc",
         "config": "base",
         "split": "train",
         "max_history": 5,
-        "max_seq_len": 512,
-        "format": "sharegpt",
-        "role_markers": {
-            "system": "system",
-            "user": "user",
-            "assistant": "assistant"
-        },
-        "special_tokens": {
-            "im_start": "<|im_start|>",
-            "im_end": "<|im_end|>",
-            "gmask_id": 64790,
-            "bos_id": 64792,
-            "eos_id": 2,
-            "pad_id": 3
-        }
+        "max_seq_len": 512
     },
     "generation": {
         "max_length": 200,
         "temperature": 0.3,
         "top_k": 50,
-        "top_p": 0.9,
         "onnx_seq_len": 32,
         "onnx_opset": 11
     },
-    "paths": {
-        "model_dir": "model",
-        "model_name": "sudenmind.pth",
-        "onnx_name": "sudenmind.onnx",
-        "data_raw_dir": "data/raw",
-        "data_processed_dir": "data/processed"
-    }
+    "paths": {}
 }

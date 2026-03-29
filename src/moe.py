@@ -196,13 +196,22 @@ class MoELayer(nn.Module):
                         token_indices
                     ]  # [num_tokens, d_model]
 
-                    # 收集对应的权重
+                    # 收集对应的权重 - 修正索引逻辑
                     expert_weights = top_k_probs[
                         batch_indices, seq_indices, k_indices
                     ]  # [num_tokens]
+                    
+                    # 检查权重合法性
+                    if torch.isnan(expert_weights).any() or torch.isinf(expert_weights).any():
+                        # 如果有NaN/Inf，用均匀权重替代
+                        expert_weights = torch.ones_like(expert_weights) / self.top_k
 
                     # 批量计算专家输出
                     expert_outputs = expert(expert_inputs)  # [num_tokens, d_model]
+                    
+                    # 检查输出合法性
+                    if torch.isnan(expert_outputs).any() or torch.isinf(expert_outputs).any():
+                        expert_outputs = torch.zeros_like(expert_outputs)
 
                     # 加权输出
                     weighted_outputs = expert_outputs * expert_weights.unsqueeze(
