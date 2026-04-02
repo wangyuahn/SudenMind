@@ -13,7 +13,7 @@
   </a>
 </p>
 
-SudenMind 是一个基于 **AttnRes (Attention with Residual)** 架构的中文对话生成模型。采用 Encoder-Decoder 设计，使用自定义 2 层 AttnRes 编码器 + 6 层 AttnRes 解码器，支持跨层残差连接，使用 **ShareGPT/ChatML** 业界标准对话格式，适配 ChatGLM tokenizer，针对中文对话场景优化。新增门控机制（Gate）和 KV 缓存（KV Cache）推理加速。
+SudenMind 是一个基于 **AttnRes (Attention Residuals)** 架构的中文对话生成模型。采用 Encoder-Decoder 设计，使用自定义 2 层 AttnRes 编码器 + 6 层 AttnRes 解码器，支持跨层残差连接，使用 **ShareGPT/ChatML** 业界标准对话格式，适配 ChatGLM tokenizer，针对中文对话场景优化。新增门控机制（Gate）和 KV 缓存（KV Cache）推理加速。
 
 ---
 
