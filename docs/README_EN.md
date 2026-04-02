@@ -13,7 +13,7 @@
   </a>
 </p>
 
-SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention with Residual)** architecture. It features an Encoder-Decoder design with custom 2-layer AttnRes encoder + 6-layer AttnRes decoder, cross-layer residual connections, **ShareGPT/ChatML** industry-standard dialogue format, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks. Enhanced with gating mechanism (Gate) and KV cache inference acceleration.
+SudenMind is a Chinese dialogue generation model based on the **AttnRes (Attention Residuals)** architecture. It features an Encoder-Decoder design with custom 2-layer AttnRes encoder + 6-layer AttnRes decoder, cross-layer residual connections, **ShareGPT/ChatML** industry-standard dialogue format, ChatGLM tokenizer integration, and optimizations for Chinese conversation tasks. Enhanced with gating mechanism (Gate) and KV cache inference acceleration.
 
 ---
 
