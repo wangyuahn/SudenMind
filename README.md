@@ -1,4 +1,4 @@
-# SudenMind
+# SudenMind （注意 这个项目暂时停止更新，我在研发新架构）
 
 <p align="center">
   <img src="https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg">
